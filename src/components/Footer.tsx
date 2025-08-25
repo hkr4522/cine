@@ -61,7 +61,7 @@ const Footer = () => {
       <div className="max-w-6xl mx-auto px-4 md:px-8">
         <div className={`${isMobile ? 'flex flex-col' : 'grid grid-cols-1 md:grid-cols-3 gap-8'}`}>
           {/* About Section */}
-          <FooterSection title="Cinepapa" id="about">
+          <FooterSection title="Flickystream" id="about">
             <p className="text-white/70 text-sm mb-4">
               Discover and enjoy the best movies and TV shows all in one place. Cinepapa helps you find, explore, and watch your favorite content online.
             </p>
@@ -143,9 +143,9 @@ const Footer = () => {
         <div className="mt-8 pt-4 border-t border-white/10 text-center">
           <div className="flex flex-col md:flex-row justify-between items-center gap-2">
             <p className="text-white/50 text-xs flex items-center">
-              © {currentYear} Cinepapa. All rights reserved.
+              © {currentYear} Flickystream. All rights reserved.
               <span className="inline-flex items-center mx-1">
-                Built with <Heart className="h-3 w-3 text-accent mx-1" fill="#E63462" /> by Cinepapa
+                Built with <Heart className="h-3 w-3 text-accent mx-1" fill="#E63462" /> by Flickystream
               </span>
             </p>
 
