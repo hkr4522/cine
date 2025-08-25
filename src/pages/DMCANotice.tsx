@@ -44,7 +44,7 @@ const DMCANotice = () => {
             <p className="mb-4">
               While we do not host content, if you have questions about our educational demonstration, contact us at:
               <br />
-              Email: support@cinepapa.com (for demonstration purposes only)
+              Email: support@flickystream.co (for demonstration purposes only)
             </p>
 
             <div className="bg-white/5 border border-white/10 rounded-lg p-4 mb-6">
