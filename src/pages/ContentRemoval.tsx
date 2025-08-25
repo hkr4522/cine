@@ -59,7 +59,7 @@ const ContentRemoval = () => {
             <p className="mb-4">
               For questions about this educational demonstration, contact:
               <br />
-              Email: support@cinepapa.com (for demonstration purposes only)
+              Email: support@flickystream.co (for demonstration purposes only)
             </p>
 
             <div className="bg-white/5 border border-white/10 rounded-lg p-4 mt-6">
