@@ -1,7 +1,7 @@
 
 {
-  "name": "Flickystream",
-  "short_name": "Flickystream",
+  "name": "Cinepeace",
+  "short_name": "Cinepeace",
   "description": "Watch movies and TV shows online",
   "start_url": "/",
   "id": "/",
@@ -64,8 +64,8 @@
   ],
   "shortcuts": [
     {
-      "name": "Flickystream",
-      "short_name": "Flickystream",
+      "name": "Cinepeace",
+      "short_name": "Cinepeace",
       "description": "Watch movies and TV shows online",
       "url": "/",
       "icons": [{ "src": "icons/icon-192x192.png", "sizes": "192x192" }]
