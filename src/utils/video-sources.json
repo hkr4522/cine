@@ -2,7 +2,7 @@
   "videoSources": [
     {
       "key": "adsfree",
-      "name": "Cinepapa",
+      "name": "Flickystream",
       "movieUrlPattern": "https://player.vidplus.to/embed/movie/{id}/1?autoplay=true&autonext=true&nextbutton=true&poster=true&title=false&watchparty=false&icons=lucide&primarycolor=F53B67&secondarycolor=F53B67&iconcolor=FFFFFF",
       "tvUrlPattern": "https://player.vidplus.to/embed/tv/{id}/{season}/{episode}?autoplay=true&autonext=true&nextbutton=true&poster=true&title=false&watchparty=false&icons=lucide&primarycolor=F53B67&secondarycolor=F53B67&iconcolor=FFFFFF"
     },
