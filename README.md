@@ -3,7 +3,7 @@
 A modern streaming platform built with React, TypeScript, and Firebase, featuring movies, TV shows, and sports content with PWA support.
 [![CodeQL](https://github.com/chintan992/letsstream2/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/chintan992/letsstream2/actions/workflows/github-code-scanning/codeql)
 
-[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/letsdevs/fstream)
+[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/hkr4522/cine)
 
 [[Deploy to Cloudflare Pages]](https://dash.cloudflare.com/pages/new?from=workers)
 
