@@ -6,7 +6,7 @@ const Logo: React.FC = () => {
 
   return (
     <div
-      title="Cinepapa"
+      title="Flickystream"
       onClick={() => navigate('/')}
       className="cursor-pointer text-white text-2xl md:text-3xl font-semibold tracking-wide"
     >
