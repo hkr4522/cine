@@ -7,6 +7,18 @@
       "tvUrlPattern": "https://player.vidplus.to/embed/tv/{id}/{season}/{episode}?autoplay=true&autonext=true&nextbutton=true&poster=true&title=false&watchparty=false&icons=lucide&primarycolor=F53B67&secondarycolor=F53B67&iconcolor=FFFFFF"
     },
     {
+      "key": "animeindia1",
+      "name": "AnimeIndia 1",
+      "movieUrlPattern": "https://api.flixindia.xyz/movie/{id}",
+      "tvUrlPattern": "https://api.flixindia.xyz/anime/{id}/{season}/{episode}"
+    },
+    {
+      "key": "animeindia2",
+      "name": "AnimeIndia 2",
+      "movieUrlPattern": "https://api.flixindia.xyz/movie/{id}",
+      "tvUrlPattern": "https://api.cinepapa.com/TA/?id={id}&season={season}&episode={episode}"
+    },
+    {
       "key": "vidlink",
       "name": "VidLink",
       "movieUrlPattern": "https://vidlink.pro/movie/{id}?autoplay=true&title=true",
