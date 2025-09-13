@@ -13,7 +13,7 @@ import { useHaptic } from '@/hooks/useHaptic';
 import { TVShow, Season, Episode, LastWatchedEpisode } from '@/utils/types';
 import { getImageUrl } from '@/utils/services/tmdb';
 
-// Type Definitions
+// Type Definitions for Type Safety
 type TabType = 'episodes' | 'about' | 'cast' | 'reviews' | 'downloads';
 interface Toast {
   message: string;
@@ -127,7 +127,7 @@ const TVShowDetailsPage = () => {
   const [isCommentoLoaded, setIsCommentoLoaded] = useState(false);
   const [expandedEpisodes, setExpandedEpisodes] = useState<number[]>([]);
 
-  // Fetch TV show details
+  // Fetch TV show details using custom hook
   const {
     tvShow,
     episodes,
@@ -196,7 +196,7 @@ const TVShowDetailsPage = () => {
     }
   }, [tvShow, episodes, getLastWatchedEpisode, isTVShowValid, isEpisodesValid, addToast]);
 
-  // Initialize Commento
+  // Initialize Commento for user comments
   useEffect(() => {
     if (!tvShow?.id) {
       console.warn('No TV show ID for Commento initialization');
@@ -247,7 +247,7 @@ const TVShowDetailsPage = () => {
     }
   }, [tvShow?.id, addToast]);
 
-  // Handle Share
+  // Handle Share functionality
   const handleShare = useCallback(async () => {
     if (!isTVShowValid) {
       console.error('No valid TV show data for sharing');
