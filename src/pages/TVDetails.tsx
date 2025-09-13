@@ -18,31 +18,30 @@ import { useAuth } from '@/hooks';
 import { useHaptic } from '@/hooks/useHaptic';
 import { TVShow, Season, Episode, LastWatchedEpisode } from '@/utils/types';
 
-// Type Definitions for Tabs
+// Type Definitions
 type TabType = 'episodes' | 'about' | 'cast' | 'reviews' | 'downloads';
-
-// Toast Type for Notifications
 interface Toast {
   message: string;
   isError: boolean;
 }
 
+// Main Component
 const TVDetailsPage = () => {
-  // Extract TV show ID from URL params
+  // Navigation and URL params
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { user } = useAuth();
   const { triggerHaptic } = useHaptic();
 
-  // State for UI controls
+  // State Management
   const [activeTab, setActiveTab] = useState<TabType>('episodes');
   const [showDownloadOverlay, setShowDownloadOverlay] = useState(false);
   const [selectedSeasonNumber, setSelectedSeasonNumber] = useState<number | null>(null);
   const [selectedEpisodeNumber, setSelectedEpisodeNumber] = useState<number | null>(null);
   const [showToast, setShowToast] = useState<Toast | null>(null);
 
-  // Fetch TV show details using custom hook
+  // Fetch TV show details
   const {
     tvShow,
     episodes,
@@ -61,51 +60,58 @@ const TVDetailsPage = () => {
     getLastWatchedEpisode,
   } = useTVDetails(id);
 
-  // Initialize season and episode for Download overlay
+  // Initialize Download Overlay
   useEffect(() => {
-    if (tvShow && episodes && episodes.length > 0) {
-      try {
-        const lastWatched = getLastWatchedEpisode();
-        if (lastWatched) {
-          setSelectedSeasonNumber(lastWatched.season_number);
-          setSelectedEpisodeNumber(lastWatched.episode_number);
+    if (!tvShow || !episodes || episodes.length === 0) {
+      console.warn('No TV show or episodes data available for initialization');
+      setShowToast({ message: 'No episodes available for download.', isError: true });
+      setTimeout(() => setShowToast(null), 3000);
+      return;
+    }
+
+    try {
+      const lastWatched = getLastWatchedEpisode();
+      if (lastWatched) {
+        setSelectedSeasonNumber(lastWatched.season_number);
+        setSelectedEpisodeNumber(lastWatched.episode_number);
+        console.log(
+          `Initialized download overlay with last watched - Season: ${lastWatched.season_number}, Episode: ${lastWatched.episode_number}`
+        );
+      } else {
+        const latestSeason = tvShow.seasons.reduce(
+          (max: Season, season: Season) =>
+            season.season_number > max.season_number ? season : max,
+          tvShow.seasons[0]
+        );
+        const latestEpisodes = episodes.filter(
+          (ep: Episode) => ep.season_number === latestSeason.season_number
+        );
+        const latestEpisode = latestEpisodes[latestEpisodes.length - 1];
+        if (latestEpisode) {
+          setSelectedSeasonNumber(latestSeason.season_number);
+          setSelectedEpisodeNumber(latestEpisode.episode_number);
           console.log(
-            `Initialized download overlay with last watched - Season: ${lastWatched.season_number}, Episode: ${lastWatched.episode_number}`
+            `Initialized download overlay with latest episode - Season: ${latestSeason.season_number}, Episode: ${latestEpisode.episode_number}`
           );
         } else {
-          // Fallback to latest season and episode
-          const latestSeason = tvShow.seasons.reduce(
-            (max: Season, season: Season) =>
-              season.season_number > max.season_number ? season : max,
-            tvShow.seasons[0]
-          );
-          const latestEpisodes = episodes.filter(
-            (ep: Episode) => ep.season_number === latestSeason.season_number
-          );
-          const latestEpisode = latestEpisodes[latestEpisodes.length - 1];
-          if (latestEpisode) {
-            setSelectedSeasonNumber(latestSeason.season_number);
-            setSelectedEpisodeNumber(latestEpisode.episode_number);
-            console.log(
-              `Initialized download overlay with latest episode - Season: ${latestSeason.season_number}, Episode: ${latestEpisode.episode_number}`
-            );
-          } else {
-            console.warn('No episodes found for latest season');
-            setShowToast({ message: 'No episodes available for download.', isError: true });
-            setTimeout(() => setShowToast(null), 3000);
-          }
+          console.warn('No episodes found for latest season');
+          setShowToast({ message: 'No episodes available for download.', isError: true });
+          setTimeout(() => setShowToast(null), 3000);
         }
-      } catch (err) {
-        console.error('Error initializing download overlay:', err);
-        setShowToast({ message: 'Failed to initialize download options.', isError: true });
-        setTimeout(() => setShowToast(null), 3000);
       }
+    } catch (err) {
+      console.error('Error initializing download overlay:', err);
+      setShowToast({ message: 'Failed to initialize download options.', isError: true });
+      setTimeout(() => setShowToast(null), 3000);
     }
   }, [tvShow, episodes, getLastWatchedEpisode]);
 
-  // Initialize Commento for user comments
+  // Initialize Commento
   useEffect(() => {
-    if (!tvShow?.id) return;
+    if (!tvShow?.id) {
+      console.warn('No TV show ID for Commento initialization');
+      return;
+    }
 
     console.log('Initializing Commento for TV show ID:', tvShow.id);
     const pageId = `tv-${tvShow.id}`;
@@ -150,7 +156,7 @@ const TVDetailsPage = () => {
     }
   }, [tvShow?.id]);
 
-  // Handle Share functionality
+  // Handle Share
   const handleShare = useCallback(async () => {
     if (!tvShow) {
       console.error('No TV show data for sharing');
@@ -187,82 +193,93 @@ const TVDetailsPage = () => {
 
   // Handle Watch Latest Episode
   const handleWatchLatestEpisode = useCallback(() => {
-    if (tvShow && episodes && episodes.length > 0) {
-      try {
-        const latestSeason = tvShow.seasons.reduce(
-          (max: Season, season: Season) =>
-            season.season_number > max.season_number ? season : max,
-          tvShow.seasons[0]
+    if (!tvShow || !episodes || episodes.length === 0) {
+      console.warn('No TV show or episodes data for playing latest episode');
+      setShowToast({ message: 'No episodes available.', isError: true });
+      setTimeout(() => setShowToast(null), 3000);
+      return;
+    }
+
+    try {
+      const latestSeason = tvShow.seasons.reduce(
+        (max: Season, season: Season) =>
+          season.season_number > max.season_number ? season : max,
+        tvShow.seasons[0]
+      );
+      const latestEpisodes = episodes.filter(
+        (ep: Episode) => ep.season_number === latestSeason.season_number
+      );
+      const latestEpisode = latestEpisodes[latestEpisodes.length - 1];
+      if (latestEpisode) {
+        handlePlayEpisode(latestSeason.season_number, latestEpisode.episode_number);
+        console.log(
+          `Playing latest episode - TV show ID: ${tvShow.id}, Season: ${latestSeason.season_number}, Episode: ${latestEpisode.episode_number}`
         );
-        const latestEpisodes = episodes.filter(
-          (ep: Episode) => ep.season_number === latestSeason.season_number
-        );
-        const latestEpisode = latestEpisodes[latestEpisodes.length - 1];
-        if (latestEpisode) {
-          handlePlayEpisode(latestSeason.season_number, latestEpisode.episode_number);
-          console.log(
-            `Playing latest episode - TV show ID: ${tvShow.id}, Season: ${latestSeason.season_number}, Episode: ${latestEpisode.episode_number}`
-          );
-        } else {
-          console.warn('No latest episode found');
-          setShowToast({ message: 'No latest episode available.', isError: true });
-          setTimeout(() => setShowToast(null), 3000);
-        }
-      } catch (err) {
-        console.error('Error playing latest episode:', err);
-        setShowToast({ message: 'Failed to play latest episode.', isError: true });
+      } else {
+        console.warn('No latest episode found');
+        setShowToast({ message: 'No latest episode available.', isError: true });
         setTimeout(() => setShowToast(null), 3000);
       }
+    } catch (err) {
+      console.error('Error playing latest episode:', err);
+      setShowToast({ message: 'Failed to play latest episode.', isError: true });
+      setTimeout(() => setShowToast(null), 3000);
     }
   }, [tvShow, episodes, handlePlayEpisode]);
 
   // Handle Download Latest Episode
   const handleDownloadLatestEpisode = useCallback(() => {
-    if (tvShow && episodes && episodes.length > 0) {
-      try {
-        const latestSeason = tvShow.seasons.reduce(
-          (max: Season, season: Season) =>
-            season.season_number > max.season_number ? season : max,
-          tvShow.seasons[0]
+    if (!tvShow || !episodes || episodes.length === 0) {
+      console.warn('No TV show or episodes data for download');
+      setShowToast({ message: 'No episodes available for download.', isError: true });
+      setTimeout(() => setShowToast(null), 3000);
+      return;
+    }
+
+    try {
+      const latestSeason = tvShow.seasons.reduce(
+        (max: Season, season: Season) =>
+          season.season_number > max.season_number ? season : max,
+        tvShow.seasons[0]
+      );
+      const latestEpisodes = episodes.filter(
+        (ep: Episode) => ep.season_number === latestSeason.season_number
+      );
+      const latestEpisode = latestEpisodes[latestEpisodes.length - 1];
+      if (latestEpisode) {
+        setSelectedSeasonNumber(latestSeason.season_number);
+        setSelectedEpisodeNumber(latestEpisode.episode_number);
+        setShowDownloadOverlay(true);
+        triggerHaptic();
+        console.log(
+          `Opened download overlay for latest episode - TV show ID: ${tvShow.id}, Season: ${latestSeason.season_number}, Episode: ${latestEpisode.episode_number}`
         );
-        const latestEpisodes = episodes.filter(
-          (ep: Episode) => ep.season_number === latestSeason.season_number
-        );
-        const latestEpisode = latestEpisodes[latestEpisodes.length - 1];
-        if (latestEpisode) {
-          setSelectedSeasonNumber(latestSeason.season_number);
-          setSelectedEpisodeNumber(latestEpisode.episode_number);
-          setShowDownloadOverlay(true);
-          triggerHaptic();
-          console.log(
-            `Opened download overlay for latest episode - TV show ID: ${tvShow.id}, Season: ${latestSeason.season_number}, Episode: ${latestEpisode.episode_number}`
-          );
-        } else {
-          console.warn('No latest episode found for download');
-          setShowToast({ message: 'No latest episode available for download.', isError: true });
-          setTimeout(() => setShowToast(null), 3000);
-        }
-      } catch (err) {
-        console.error('Error opening download overlay for latest episode:', err);
-        setShowToast({ message: 'Failed to open download overlay.', isError: true });
+      } else {
+        console.warn('No latest episode found for download');
+        setShowToast({ message: 'No latest episode available for download.', isError: true });
         setTimeout(() => setShowToast(null), 3000);
       }
+    } catch (err) {
+      console.error('Error opening download overlay for latest episode:', err);
+      setShowToast({ message: 'Failed to open download overlay.', isError: true });
+      setTimeout(() => setShowToast(null), 3000);
     }
   }, [tvShow, episodes, triggerHaptic]);
 
   // Handle Download for specific episode
   const handleOpenDownload = useCallback(() => {
-    if (tvShow && selectedSeasonNumber && selectedEpisodeNumber) {
-      setShowDownloadOverlay(true);
-      triggerHaptic();
-      console.log(
-        `Opened download overlay for TV show ID: ${tvShow.id}, Season: ${selectedSeasonNumber}, Episode: ${selectedEpisodeNumber}`
-      );
-    } else {
-      console.warn('Invalid season or episode for download');
+    if (!tvShow || !selectedSeasonNumber || !selectedEpisodeNumber) {
+      console.warn('Invalid TV show, season, or episode for download');
       setShowToast({ message: 'Please select a valid season and episode.', isError: true });
       setTimeout(() => setShowToast(null), 3000);
+      return;
     }
+
+    setShowDownloadOverlay(true);
+    triggerHaptic();
+    console.log(
+      `Opened download overlay for TV show ID: ${tvShow.id}, Season: ${selectedSeasonNumber}, Episode: ${selectedEpisodeNumber}`
+    );
   }, [tvShow, selectedSeasonNumber, selectedEpisodeNumber, triggerHaptic]);
 
   // Handle Close Download Overlay
@@ -274,16 +291,17 @@ const TVDetailsPage = () => {
 
   // Handle Play Episode in Download Overlay
   const handlePlayEpisodeInOverlay = useCallback(() => {
-    if (tvShow && selectedSeasonNumber && selectedEpisodeNumber) {
-      handlePlayEpisode(selectedSeasonNumber, selectedEpisodeNumber);
-      console.log(
-        `Playing TV show ${tvShow.id}, Season: ${selectedSeasonNumber}, Episode: ${selectedEpisodeNumber}`
-      );
-    } else {
-      console.warn('Invalid season or episode for playback');
+    if (!tvShow || !selectedSeasonNumber || !selectedEpisodeNumber) {
+      console.warn('Invalid TV show, season, or episode for playback');
       setShowToast({ message: 'Please select a valid season and episode.', isError: true });
       setTimeout(() => setShowToast(null), 3000);
+      return;
     }
+
+    handlePlayEpisode(selectedSeasonNumber, selectedEpisodeNumber);
+    console.log(
+      `Playing TV show ${tvShow.id}, Season: ${selectedSeasonNumber}, Episode: ${selectedEpisodeNumber}`
+    );
   }, [tvShow, selectedSeasonNumber, selectedEpisodeNumber, handlePlayEpisode]);
 
   // Render Loading State
@@ -360,7 +378,11 @@ const TVDetailsPage = () => {
               allowFullScreen
               title="TV Show Trailer"
               onLoad={() => console.log('Trailer iframe loaded')}
-              onError={() => console.error('Failed to load trailer iframe')}
+              onError={() => {
+                console.error('Failed to load trailer iframe');
+                setShowToast({ message: 'Failed to load trailer.', isError: true });
+                setTimeout(() => setShowToast(null), 3000);
+              }}
             />
           </div>
         )}
@@ -406,12 +428,18 @@ const TVDetailsPage = () => {
               <select
                 value={selectedSeasonNumber}
                 onChange={(e) => {
-                  const seasonNum = parseInt(e.target.value, 10);
-                  setSelectedSeasonNumber(seasonNum);
-                  const seasonEpisodes = episodes.filter((ep: Episode) => ep.season_number === seasonNum);
-                  const firstEpisode = seasonEpisodes[0]?.episode_number || 1;
-                  setSelectedEpisodeNumber(firstEpisode);
-                  console.log(`Selected Season: ${seasonNum}, Episode: ${firstEpisode}`);
+                  try {
+                    const seasonNum = parseInt(e.target.value, 10);
+                    setSelectedSeasonNumber(seasonNum);
+                    const seasonEpisodes = episodes.filter((ep: Episode) => ep.season_number === seasonNum);
+                    const firstEpisode = seasonEpisodes[0]?.episode_number || 1;
+                    setSelectedEpisodeNumber(firstEpisode);
+                    console.log(`Selected Season: ${seasonNum}, Episode: ${firstEpisode}`);
+                  } catch (err) {
+                    console.error('Error selecting season:', err);
+                    setShowToast({ message: 'Failed to select season.', isError: true });
+                    setTimeout(() => setShowToast(null), 3000);
+                  }
                 }}
                 className="bg-background border border-white/20 text-white rounded px-3 py-2"
               >
@@ -424,9 +452,15 @@ const TVDetailsPage = () => {
               <select
                 value={selectedEpisodeNumber}
                 onChange={(e) => {
-                  const epNum = parseInt(e.target.value, 10);
-                  setSelectedEpisodeNumber(epNum);
-                  console.log(`Selected Episode: ${epNum}`);
+                  try {
+                    const epNum = parseInt(e.target.value, 10);
+                    setSelectedEpisodeNumber(epNum);
+                    console.log(`Selected Episode: ${epNum}`);
+                  } catch (err) {
+                    console.error('Error selecting episode:', err);
+                    setShowToast({ message: 'Failed to select episode.', isError: true });
+                    setTimeout(() => setShowToast(null), 3000);
+                  }
                 }}
                 className="bg-background border border-white/20 text-white rounded px-3 py-2"
               >
