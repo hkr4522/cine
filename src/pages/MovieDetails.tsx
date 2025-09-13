@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import Navbar from '@/components/Navbar';
 import ContentRow from '@/components/ContentRow';
 import ReviewSection from '@/components/ReviewSection';
-import { Play, Clock, Calendar, Star, ArrowLeft, Shield, Heart, Bookmark } from 'lucide-react';
+import { Play, Clock, Calendar, Star, ArrowLeft, Shield, Heart, Bookmark, Download } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useWatchHistory } from '@/hooks/watch-history';
 import { DownloadSection } from '@/components/DownloadSection';
@@ -38,6 +38,9 @@ const MovieDetailsPage = () => {
   const { addToFavorites, addToWatchlist, removeFromFavorites, removeFromWatchlist, isInFavorites, isInWatchlist } = useWatchHistory();
   const [isFavorite, setIsFavorite] = useState(false);
   const [isInMyWatchlist, setIsInMyWatchlist] = useState(false);
+
+  // Download Overlay State
+  const [showDownloadOverlay, setShowDownloadOverlay] = useState(false);
 
   // UI and Device States
   const isMobile = useIsMobile();
@@ -168,6 +171,22 @@ const MovieDetailsPage = () => {
     }
   };
 
+  // Handle Download - Open overlay with iframe
+  const handleOpenDownload = () => {
+    if (movie) {
+      setShowDownloadOverlay(true);
+      triggerHaptic();
+      console.log(`Opened download overlay for movie ID: ${movie.id}`);
+    }
+  };
+
+  // Handle Close Overlay - Close the download overlay
+  const handleCloseDownload = () => {
+    setShowDownloadOverlay(false);
+    triggerHaptic();
+    console.log('Closed download overlay');
+  };
+
   // Toggle Favorite - Add/remove from favorites
   const handleToggleFavorite = () => {
     if (!movie) return;
@@ -207,7 +226,8 @@ const MovieDetailsPage = () => {
         poster_path: movie.poster_path,
         backdrop_path: movie.backdrop_path,
         overview: movie.overview,
-        rating: movie.vote_average,
+        rating: movie.vot
+        e_average,
       });
       setIsInMyWatchlist(true);
       console.log(`Added movie ${movie.id} to watchlist`);
@@ -254,7 +274,7 @@ const MovieDetailsPage = () => {
     );
   }
 
-  // Main Render - Movie details page with Commento integration
+  // Main Render - Movie details page with Commento integration and Download overlay
   return (
     <div className="min-h-screen bg-background">
       {/* Navigation Bar */}
@@ -366,11 +386,15 @@ const MovieDetailsPage = () => {
               {/* Overview */}
               <p className="text-white/80 mb-6">{movie.overview}</p>
               
-              {/* Action Buttons - Play, Favorite, Watchlist */}
+              {/* Action Buttons - Play, Download, Favorite, Watchlist */}
               <div className="flex flex-wrap gap-3">
                 <Button onClick={handlePlayMovie} className="bg-accent hover:bg-accent/80 text-white flex items-center">
                   <Play className="h-4 w-4 mr-2" />
                   Play
+                </Button>
+                <Button onClick={handleOpenDownload} className="bg-accent hover:bg-accent/80 text-white flex items-center">
+                  <Download className="h-4 w-4 mr-2" />
+                  Download
                 </Button>
                 <Button
                   onClick={handleToggleFavorite}
@@ -393,6 +417,43 @@ const MovieDetailsPage = () => {
           </div>
         </div>
       </div>
+
+      {/* Download Overlay - Centered modal with iframe and close button */}
+      {showDownloadOverlay && movie && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div className="relative bg-background rounded-lg shadow-xl w-full max-w-4xl p-6">
+            {/* Close Button */}
+            <button
+              onClick={handleCloseDownload}
+              className="absolute top-4 right-4 text-white p-2 rounded-full bg-black/50 hover:bg-black/70 transition-colors"
+              aria-label="Close download overlay"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            
+            {/* Security Message */}
+            <p className="text-white text-center mb-4">
+              Please solve this due to security requirements
+            </p>
+            
+            {/* Iframe for Download Page */}
+            <iframe
+              className="w-full h-[60vh] rounded-lg border-2 border-white/10"
+              src={`https://dl.vidsrc.vip/movie/${movie.id}`}
+              sandbox="allow-same-origin allow-scripts allow-forms"
+              allowFullScreen
+              title="Download Movie"
+              onLoad={() => console.log(`Download iframe loaded for movie ID: ${movie.id}`)}
+              onError={() => {
+                console.error('Failed to load download iframe');
+                alert('Failed to load download content. Please try again.');
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Tabs Section - About, Cast, Reviews, Downloads */}
       <div className="max-w-6xl mx-auto px-4 py-8">
