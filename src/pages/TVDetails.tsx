@@ -110,6 +110,36 @@ const TVDetailsPage = () => {
     };
   }, [tvShow?.id]);
 
+  // Handle Share
+  const handleShare = async () => {
+    if (!tvShow) return;
+
+    const shareUrl = window.location.href;
+    const shareData = {
+      title: tvShow.name,
+      text: `Watch ${tvShow.name} now! ${tvShow.overview.slice(0, 100)}...`,
+      url: shareUrl,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+        triggerHaptic();
+        console.log(`Shared TV show ${tvShow.id} via Web Share API: ${shareUrl}`);
+      } else {
+        await navigator.clipboard.writeText(shareUrl);
+        triggerHaptic();
+        setShowToast({ message: 'Link copied to clipboard!', isError: false });
+        console.log(`Copied TV show ${tvShow.id} URL to clipboard: ${shareUrl}`);
+        setTimeout(() => setShowToast(null), 3000);
+      }
+    } catch (error) {
+      console.error('Error sharing TV show:', error);
+      setShowToast({ message: 'Failed to share. Please try again.', isError: true });
+      setTimeout(() => setShowToast(null), 3000);
+    }
+  };
+
   // Handle Watch Latest Episode
   const handleWatchLatestEpisode = () => {
     if (tvShow && episodes) {
@@ -243,8 +273,8 @@ const TVDetailsPage = () => {
           lastWatchedEpisode={getLastWatchedEpisode()}
           onShare={handleShare}
           onDownload={handleOpenDownload}
-          onWatchLatestEpisode={handleWatchLatestEpisode} // New prop
-          onDownloadLatestEpisode={handleDownloadLatestEpisode} // New prop
+          onWatchLatestEpisode={handleWatchLatestEpisode}
+          onDownloadLatestEpisode={handleDownloadLatestEpisode}
         />
       </div>
 
