@@ -117,54 +117,45 @@ const MovieDetailsPage = () => {
     }
   }, [movie?.id, isInFavorites, isInWatchlist]);
 
-  // Initialize GraphComment - Dynamically load GraphComment script with unique uid per movie
+  // Initialize Commento - Dynamically load Commento script
   useEffect(() => {
     if (!movie?.id) return;
 
-    console.log('Initializing GraphComment for movie ID:', movie.id);
+    console.log('Initializing Commento for movie ID:', movie.id);
     const pageId = `movie-${movie.id}`;
 
-    // Define GraphComment parameters
-    const __semio__params = {
-      graphcommentId: "cinepeace",
-      behaviour: {
-        uid: pageId, // Unique identifier for comments thread (movie-specific)
-      },
-    };
-
-    // Define onload function for GraphComment
-    (window as any).__semio__onload = function () {
-      if ((window as any).__semio__gc_graphlogin) {
-        (window as any).__semio__gc_graphlogin(__semio__params);
-        console.log('GraphComment initialized with uid:', pageId);
+    // Load Commento script
+    const script = document.createElement('script');
+    script.src = 'https://cdn.commento.io/js/commento.js';
+    script.defer = true;
+    script.async = true;
+    script.onload = () => {
+      console.log('Commento script loaded successfully');
+      // Ensure the Commento div has the correct page-id
+      const commentoDiv = document.getElementById('commento');
+      if (commentoDiv) {
+        commentoDiv.setAttribute('data-page-id', pageId);
+        console.log(`Commento initialized with data-page-id: ${pageId}`);
       } else {
-        console.error('GraphComment __semio__gc_graphlogin not available');
+        console.error('Commento div not found');
         alert('Failed to initialize comments. Please refresh the page.');
       }
     };
-
-    // Load GraphComment script
-    const gc = document.createElement('script');
-    gc.type = 'text/javascript';
-    gc.async = true;
-    gc.defer = true;
-    gc.src = 'https://integration.graphcomment.com/gc_graphlogin.js?' + Date.now();
-    gc.onload = (window as any).__semio__onload;
-    gc.onerror = () => {
-      console.error('Failed to load GraphComment script');
+    script.onerror = () => {
+      console.error('Failed to load Commento script');
       alert('Failed to load comments system. Check your network and try again.');
     };
 
     // Append script to document
     const target = document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0];
-    target.appendChild(gc);
-    console.log('GraphComment script appended to document');
+    target.appendChild(script);
+    console.log('Commento script appended to document');
 
     // Cleanup: Remove script on unmount
     return () => {
-      if (gc.parentNode) {
-        gc.parentNode.removeChild(gc);
-        console.log('GraphComment script removed');
+      if (script.parentNode) {
+        script.parentNode.removeChild(script);
+        console.log('Commento script removed');
       }
     };
   }, [movie?.id]);
@@ -263,7 +254,7 @@ const MovieDetailsPage = () => {
     );
   }
 
-  // Main Render - Movie details page with GraphComment integration
+  // Main Render - Movie details page with Commento integration
   return (
     <div className="min-h-screen bg-background">
       {/* Navigation Bar */}
@@ -427,7 +418,7 @@ const MovieDetailsPage = () => {
             Cast
           </button>
           <button
-            className={`py-2 px-4 font-medium whitespace-nowrap ${activeTab === 'reviews' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'}`}
+            className=`py-2 px-4 font-medium whitespace-nowrap ${activeTab === 'reviews' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'}`
             onClick={() => {
               triggerHaptic();
               setActiveTab('reviews');
@@ -529,11 +520,11 @@ const MovieDetailsPage = () => {
         <ContentRow title="More Like This" media={recommendations} />
       )}
 
-      {/* GraphComment Section - Embedded comments widget */}
+      {/* Commento Section - Embedded comments widget */}
       {movie && (
         <div className="max-w-6xl mx-auto px-4 py-8">
           <h3 className="text-xl font-semibold text-white mb-4">Comments</h3>
-          <div id="graphcomment"></div>
+          <div id="commento" data-page-id={`movie-${movie.id}`}></div>
         </div>
       )}
     </div>
