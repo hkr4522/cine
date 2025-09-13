@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import ContentRow from '@/components/ContentRow';
 import Navbar from '@/components/Navbar';
 import ReviewSection from '@/components/ReviewSection';
+import CommentsSection from '@/components/CommentsSection'; // New custom comments component
 import TVShowHeader from '@/components/tv/TVShowHeader';
 import TVShowEpisodes from '@/components/tv/TVShowEpisodes';
 import TVShowAbout from '@/components/tv/TVShowAbout';
@@ -69,59 +70,6 @@ const TVDetailsPage = () => {
       console.log(`Initialized download overlay - Season: ${selectedSeasonNumber}, Episode: ${selectedEpisodeNumber}`);
     }
   }, [tvShow, episodes, getLastWatchedEpisode]);
-
-  // Disqus Integration
-  useEffect(() => {
-    if (!tvShow?.id) return;
-
-    console.log('Initializing Disqus for TV show ID:', tvShow.id);
-    const pageId = `tv-${tvShow.id}`;
-
-    // Define Disqus configuration
-    (window as any).disqus_config = function () {
-      this.page.url = window.location.href; // Current page URL
-      this.page.identifier = pageId; // Unique identifier for the TV show
-      this.page.title = tvShow.name; // TV show title
-    };
-
-    // Load Disqus script
-    const loadDisqus = () => {
-      const d = document;
-      const s = d.createElement('script');
-      s.src = 'https://cinepapa.disqus.com/embed.js';
-      s.setAttribute('data-timestamp', `${+new Date()}`);
-      s.async = true;
-      s.onload = () => {
-        console.log('Disqus script loaded successfully');
-      };
-      s.onerror = () => {
-        console.error('Failed to load Disqus script');
-        setShowToast({ message: 'Failed to load comments system. Check your network and try again.', isError: true });
-        setTimeout(() => setShowToast(null), 3000);
-      };
-      (d.head || d.body).appendChild(s);
-    };
-
-    // Reset or load Disqus
-    if ((window as any).DISQUS) {
-      console.log('Resetting Disqus for TV show:', pageId);
-      (window as any).DISQUS.reset({
-        reload: true,
-        config: (window as any).disqus_config,
-      });
-    } else {
-      loadDisqus();
-    }
-
-    // Cleanup: Clear Disqus thread content
-    return () => {
-      const disqusThread = document.getElementById('disqus_thread');
-      if (disqusThread) {
-        disqusThread.innerHTML = '';
-        console.log('Cleared Disqus thread content');
-      }
-    };
-  }, [tvShow?.id, tvShow?.name]);
 
   // Handle Share - Share the TV show page URL via Web Share API or copy to clipboard
   const handleShare = async () => {
@@ -379,9 +327,7 @@ const TVDetailsPage = () => {
             About
           </button>
           <button
-            className=`py-2 px-4 font-medium whitespace-nowrap ${
-              activeTab === 'cast' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'
-            }`}
+            className={activeTab === 'cast' ? 'text-white border-b-2 border-accent py-2 px-4 font-medium whitespace-nowrap' : 'text-white/60 hover:text-white py-2 px-4 font-medium whitespace-nowrap'}
             onClick={() => {
               triggerHaptic();
               setActiveTab('cast');
@@ -459,16 +405,11 @@ const TVDetailsPage = () => {
         <ContentRow title="More Like This" media={recommendations} />
       )}
 
-      {/* Disqus Comments Section */}
+      {/* Custom Comments Section */}
       {tvShow && (
         <div className="max-w-6xl mx-auto px-4 py-8">
           <h3 className="text-xl font-semibold text-white mb-4">Comments</h3>
-          <div id="disqus_thread">
-            <p className="text-white/70">Loading comments... If comments do not load, please check your connection or try again later.</p>
-          </div>
-          <noscript>
-            Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a>
-          </noscript>
+          <CommentsSection mediaId={parseInt(id!, 10)} mediaType="tv" />
         </div>
       )}
     </div>
