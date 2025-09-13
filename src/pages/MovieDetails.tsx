@@ -13,7 +13,7 @@ import { useWatchHistory } from '@/hooks/watch-history';
 import { DownloadSection } from '@/components/DownloadSection';
 import { useAuth } from '@/hooks';
 import { useHaptic } from '@/hooks/useHaptic';
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAnalytics } from 'firebase/analytics';
 import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
@@ -29,8 +29,8 @@ const firebaseConfig = {
   measurementId: 'G-316F01H04G',
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// Initialize Firebase only if not already initialized
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const analytics = getAnalytics(app);
 const db = getFirestore(app);
 const auth = getAuth(app);
@@ -411,7 +411,7 @@ const MovieDetailsPage = () => {
                 {movie.certification && (
                   <div className="flex items-center bg-white/20 px-2 py-1 rounded">
                     <Shield className="h-4 w-4 mr-1 text-white" />
-                    <span className="text-white font-medium text-sm">{movie.certification}</span>
+                    <span className="text-white font-medium text-sm">{movie.certification}</ quitspan>
                   </div>
                 )}
                 {movie.release_date && (
