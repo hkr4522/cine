@@ -42,6 +42,9 @@ const MovieDetailsPage = () => {
   // Download Overlay State
   const [showDownloadOverlay, setShowDownloadOverlay] = useState(false);
 
+  // Toast State for Clipboard Feedback
+  const [showToast, setShowToast] = useState<{ message: string; isError: boolean } | null>(null);
+
   // UI and Device States
   const isMobile = useIsMobile();
   const { triggerHaptic } = useHaptic();
@@ -141,12 +144,14 @@ const MovieDetailsPage = () => {
         console.log(`Commento initialized with data-page-id: ${pageId}`);
       } else {
         console.error('Commento div not found');
-        alert('Failed to initialize comments. Please refresh the page.');
+        setShowToast({ message: 'Failed to initialize comments. Please refresh the page.', isError: true });
+        setTimeout(() => setShowToast(null), 3000);
       }
     };
     script.onerror = () => {
       console.error('Failed to load Commento script');
-      alert('Failed to load comments system. Check your network and try again.');
+      setShowToast({ message: 'Failed to load comments system. Check your network and try again.', isError: true });
+      setTimeout(() => setShowToast(null), 3000);
     };
 
     // Append script to document
@@ -194,24 +199,26 @@ const MovieDetailsPage = () => {
     const shareUrl = window.location.href; // e.g., https://your-site.netlify.app/movie/123
     const shareData = {
       title: movie.title,
-      text: `Check out ${movie.title} on our site!`,
+      text: `Watch ${movie.title} now! ${movie.overview.slice(0, 100)}...`,
       url: shareUrl,
     };
 
     try {
-      if (navigator.share && isMobile) {
+      if (navigator.share) {
         await navigator.share(shareData);
         triggerHaptic();
         console.log(`Shared movie ${movie.id} via Web Share API: ${shareUrl}`);
       } else {
         await navigator.clipboard.writeText(shareUrl);
         triggerHaptic();
-        alert('Link copied to clipboard!');
+        setShowToast({ message: 'Link copied to clipboard!', isError: false });
         console.log(`Copied movie ${movie.id} URL to clipboard: ${shareUrl}`);
+        setTimeout(() => setShowToast(null), 3000);
       }
     } catch (error) {
       console.error('Error sharing movie:', error);
-      alert('Failed to share. Please try again.');
+      setShowToast({ message: 'Failed to share. Please try again.', isError: true });
+      setTimeout(() => setShowToast(null), 3000);
     }
   };
 
@@ -306,6 +313,17 @@ const MovieDetailsPage = () => {
     <div className="min-h-screen bg-background">
       {/* Navigation Bar */}
       <Navbar />
+
+      {/* Toast Notification */}
+      {showToast && (
+        <div
+          className={`fixed top-5 left-1/2 transform -translate-x-1/2 z-[1000] px-6 py-3 rounded-lg text-white text-sm font-medium shadow-lg transition-opacity duration-300 ${
+            showToast.isError ? 'bg-red-600 border-red-400' : 'bg-background border-white/20'
+          } animate-fade-in`}
+        >
+          {showToast.message}
+        </div>
+      )}
 
       {/* Backdrop Image Section - Hero section with movie backdrop and info */}
       <div className="relative w-full h-[70vh]">
@@ -478,7 +496,8 @@ const MovieDetailsPage = () => {
               onLoad={() => console.log(`Download iframe loaded for movie ID: ${movie.id}`)}
               onError={() => {
                 console.error('Failed to load download iframe');
-                alert('Failed to load download content. Please try again.');
+                setShowToast({ message: 'Failed to load download content. Please try again.', isError: true });
+                setTimeout(() => setShowToast(null), 3000);
               }}
             />
           </div>
