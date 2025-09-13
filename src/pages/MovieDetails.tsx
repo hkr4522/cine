@@ -15,11 +15,10 @@ import { useAuth } from '@/hooks';
 import { useHaptic } from '@/hooks/useHaptic';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAnalytics } from 'firebase/analytics';
-import { getDatabase, ref, push, onValue, update, remove, serverTimestamp } from 'firebase/database';
+import { getDatabase, ref, push, onValue, update, remove } from 'firebase/database';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
-// Firebase Configuration - This is the config for your Firebase project
-// Make sure this matches your Firebase project settings in the console
+// Firebase Configuration - Ensure this matches your Firebase Console settings
 const firebaseConfig = {
   apiKey: "AIzaSyDs4m55HdwEbh2nhr8lzauK-1vj3otkQmA",
   authDomain: "cinecomments.firebaseapp.com",
@@ -28,28 +27,28 @@ const firebaseConfig = {
   messagingSenderId: "737334252175",
   appId: "1:737334252175:web:39c899d69a89e40ea1d6fa",
   measurementId: "G-316F01H04G",
-  databaseURL: "https://cinecomments-default-rtdb.firebaseio.com/" // Add this for Realtime Database
+  databaseURL: "https://cinecomments-default-rtdb.firebaseio.com/" // Realtime Database URL
 };
 
-// Initialize Firebase only if not already initialized - This prevents duplicate app errors
+// Initialize Firebase - Singleton pattern to avoid duplicate app errors
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const analytics = getAnalytics(app);
-const db = getDatabase(app); // Use Realtime Database for JSON-like storage
+const db = getDatabase(app);
 const auth = getAuth(app);
 
-// Comment Interface - Defines the structure for a comment object
+// Comment Interface - Structure for comments and replies
 interface Comment {
   id: string;
   content: string;
   author: string;
-  authorId: string; // Anonymous UID for tracking
-  timestamp: any; // Firebase server timestamp
-  gifUrl?: string; // Optional GIF URL
-  reactions: { [key: string]: { [userId: string]: boolean } }; // User-based reactions for toggle
-  replies: Comment[]; // Nested replies for threaded comments
+  authorId: string;
+  timestamp: number;
+  gifUrl?: string;
+  reactions: { [key: string]: { [userId: string]: boolean } };
+  replies: Comment[];
 }
 
-// Emoji Reactions - Define the 5 emojis for reactions
+// Emoji Reactions - 5 emojis for reactions
 const emojiReactions = [
   { key: 'like', emoji: <ThumbsUp size={16} />, label: 'Like' },
   { key: 'love', emoji: <HeartIcon size={16} />, label: 'Love' },
@@ -58,24 +57,21 @@ const emojiReactions = [
   { key: 'sad', emoji: <Frown size={16} />, label: 'Sad' },
 ];
 
-// GIF Integration - Simple placeholder for GIFs (users can paste GIF URLs, e.g., from Giphy)
-// Note: For real GIF search, you'd need a Giphy API key, but keeping it simple with URL input
+// GIF Validation - Basic check for valid GIF URLs
 const handleGifInput = (gifUrl: string) => {
-  // Validate GIF URL (basic check)
   if (gifUrl && (gifUrl.includes('giphy.com') || gifUrl.includes('tenor.com') || gifUrl.includes('.gif'))) {
     return gifUrl;
   }
   return null;
 };
 
-// Timestamp Formatter - Formats Firebase timestamp to readable date/time
-const formatTimestamp = (timestamp: any) => {
+// Timestamp Formatter - Convert timestamp to readable format
+const formatTimestamp = (timestamp: number) => {
   if (!timestamp) return 'Just now';
-  const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+  const date = new Date(timestamp);
   return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-// Main Component - MovieDetailsPage with integrated comment system using Firebase Realtime Database
 type TabType = 'about' | 'cast' | 'reviews' | 'downloads';
 
 const MovieDetailsPage = () => {
@@ -95,14 +91,7 @@ const MovieDetailsPage = () => {
   const [cast, setCast] = useState<CastMember[]>([]);
 
   // Watch History and User States
-  const {
-    addToFavorites,
-    addToWatchlist,
-    removeFromFavorites,
-    removeFromWatchlist,
-    isInFavorites,
-    isInWatchlist,
-  } = useWatchHistory();
+  const { addToFavorites, addToWatchlist, removeFromFavorites, removeFromWatchlist, isInFavorites, isInWatchlist } = useWatchHistory();
   const [isFavorite, setIsFavorite] = useState(false);
   const [isInMyWatchlist, setIsInMyWatchlist] = useState(false);
 
@@ -111,19 +100,19 @@ const MovieDetailsPage = () => {
   const { triggerHaptic } = useHaptic();
   const { user } = useAuth();
 
-  // Comment System States - Using Realtime Database for JSON-like storage
+  // Comment System States
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
-  const [newReply, setNewReply] = useState<{ [key: string]: string }>({}); // Per-comment reply input
-  const [newGifUrl, setNewGifUrl] = useState(''); // For GIF input
+  const [newReply, setNewReply] = useState<{ [key: string]: string }>({});
+  const [newGifUrl, setNewGifUrl] = useState('');
   const [authorName, setAuthorName] = useState('');
   const [commentsLoading, setCommentsLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [replyingTo, setReplyingTo] = useState<string | null>(null); // Track which comment is being replied to
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [showGifInput, setShowGifInput] = useState(false); // Toggle GIF input
+  const [showGifInput, setShowGifInput] = useState(false);
 
-  // Fetch Movie Details - API calls for movie data
+  // Fetch Movie Data
   useEffect(() => {
     const fetchMovieData = async () => {
       if (!id) {
@@ -168,7 +157,7 @@ const MovieDetailsPage = () => {
     fetchMovieData();
   }, [id]);
 
-  // Fetch Trailer - Get YouTube trailer key
+  // Fetch Trailer
   useEffect(() => {
     const fetchTrailer = async () => {
       if (movie?.id) {
@@ -185,7 +174,7 @@ const MovieDetailsPage = () => {
     fetchTrailer();
   }, [movie?.id]);
 
-  // Update Watch History - Check favorites and watchlist
+  // Watch History
   useEffect(() => {
     if (movie?.id) {
       setIsFavorite(isInFavorites(movie.id, 'movie'));
@@ -193,42 +182,55 @@ const MovieDetailsPage = () => {
     }
   }, [movie?.id, isInFavorites, isInWatchlist]);
 
-  // Firebase Authentication - Handle anonymous sign-in for comment system
+  // Firebase Authentication - Simplified with retry
   useEffect(() => {
     console.log('Starting Firebase auth setup...');
-    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        try {
-          console.log('No user found, attempting anonymous sign-in...');
-          await signInAnonymously(auth);
-          console.log('Anonymous sign-in successful');
-          setAuthReady(true);
-        } catch (error) {
-          console.error('Error signing in anonymously:', error);
-          alert('Failed to initialize commenting. Please refresh the page.');
+    let retryCount = 0;
+    const maxRetries = 3;
+
+    const trySignIn = async () => {
+      try {
+        console.log('Attempting anonymous sign-in...');
+        await signInAnonymously(auth);
+        console.log('Anonymous sign-in successful');
+        setAuthReady(true);
+      } catch (error) {
+        console.error('Error signing in anonymously:', error);
+        if (retryCount < maxRetries) {
+          retryCount++;
+          console.log(`Retrying sign-in (${retryCount}/${maxRetries})...`);
+          setTimeout(trySignIn, 1000 * retryCount); // Retry after delay
+        } else {
+          alert('Failed to initialize commenting after multiple attempts. Please refresh the page.');
           setAuthReady(false);
         }
-      } else {
-        console.log('User already authenticated:', user.uid);
+      }
+    };
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        console.log('User authenticated:', user.uid);
         setAuthReady(true);
+      } else {
+        console.log('No user found, initiating sign-in...');
+        trySignIn();
       }
     });
 
-    return () => unsubscribeAuth();
+    return () => unsubscribe();
   }, []);
 
-  // Load Comments from Realtime Database - Real-time listener for {page-id}.json-like structure
+  // Load Comments - Real-time listener for comments
   useEffect(() => {
     if (movie?.id && authReady) {
       const pageId = `movie-${movie.id}`;
-      console.log(`Loading comments for page ID: ${pageId}`);
+      console.log(`Loading comments for ${pageId}`);
       const commentsRef = ref(db, `comments/${pageId}`);
       const unsubscribe = onValue(commentsRef, (snapshot) => {
         if (snapshot.exists()) {
-          const data = snapshot.val() as { [key: string]: any };
+          const data = snapshot.val();
           const loadedComments: Comment[] = Object.keys(data).map((key) => {
             const commentData = data[key];
-            // Recursively build nested replies
             const buildReplies = (repliesData: { [key: string]: any }): Comment[] => {
               return Object.keys(repliesData).map((replyKey) => ({
                 id: replyKey,
@@ -254,15 +256,15 @@ const MovieDetailsPage = () => {
           });
           setComments(loadedComments);
           setCommentsLoading(false);
-          console.log(`Loaded ${loadedComments.length} comments for ${pageId}`);
+          console.log(`Loaded ${loadedComments.length} comments`);
         } else {
           setComments([]);
           setCommentsLoading(false);
-          console.log(`No comments found for ${pageId}`);
+          console.log('No comments found');
         }
       }, (error) => {
         console.error('Error loading comments:', error);
-        alert('Failed to load comments. Please try again.');
+        alert('Failed to load comments. Check your network or Firebase setup.');
         setCommentsLoading(false);
       });
 
@@ -270,7 +272,7 @@ const MovieDetailsPage = () => {
     }
   }, [movie?.id, authReady]);
 
-  // Send Main Comment - Add a new top-level comment to the {page-id}.json structure
+  // Send Comment - Post a new top-level comment
   const sendComment = async () => {
     if (!newComment.trim()) {
       alert('Please enter a comment.');
@@ -281,7 +283,7 @@ const MovieDetailsPage = () => {
       return;
     }
     if (!auth.currentUser) {
-      alert('Authentication required. Please wait and try again.');
+      alert('Authentication not ready. Please wait or refresh.');
       return;
     }
     if (!authReady) {
@@ -292,7 +294,7 @@ const MovieDetailsPage = () => {
     const pageId = `movie-${movie.id}`;
     setSending(true);
     try {
-      console.log('Sending main comment:', { content: newComment, author: authorName || 'Anonymous', gif: newGifUrl });
+      console.log('Sending comment:', { content: newComment, author: authorName || 'Anonymous', gif: newGifUrl });
       const commentsRef = ref(db, `comments/${pageId}`);
       const newCommentRef = push(commentsRef);
       const commentData: Comment = {
@@ -300,15 +302,9 @@ const MovieDetailsPage = () => {
         content: newComment,
         author: authorName.trim() || 'Anonymous',
         authorId: auth.currentUser.uid,
-        timestamp: serverTimestamp(),
+        timestamp: Date.now(),
         gifUrl: handleGifInput(newGifUrl),
-        reactions: {
-          like: {},
-          love: {},
-          laugh: {},
-          wow: {},
-          sad: {},
-        },
+        reactions: { like: {}, love: {}, laugh: {}, wow: {}, sad: {} },
         replies: [],
       };
       await update(newCommentRef, commentData);
@@ -319,16 +315,16 @@ const MovieDetailsPage = () => {
       alert('Comment posted successfully!');
     } catch (error) {
       console.error('Error adding comment:', error);
-      alert('Failed to post comment. Please try again.');
+      alert('Failed to post comment. Check console for details.');
     } finally {
       setSending(false);
     }
   };
 
-  // Send Reply - Add a reply to a specific comment in the threaded structure
+  // Send Reply - Post a reply to a comment
   const sendReply = async (parentId: string) => {
     const replyText = newReply[parentId];
-    if (!replyText || !replyText.trim()) {
+    if (!replyText?.trim()) {
       alert('Please enter a reply.');
       return;
     }
@@ -337,7 +333,7 @@ const MovieDetailsPage = () => {
       return;
     }
     if (!auth.currentUser) {
-      alert('Authentication required. Please wait and try again.');
+      alert('Authentication not ready. Please wait or refresh.');
       return;
     }
     if (!authReady) {
@@ -349,7 +345,6 @@ const MovieDetailsPage = () => {
     setSending(true);
     try {
       console.log('Sending reply to', parentId, ':', replyText);
-      const parentCommentRef = ref(db, `comments/${pageId}/${parentId}`);
       const repliesRef = ref(db, `comments/${pageId}/${parentId}/replies`);
       const newReplyRef = push(repliesRef);
       const replyData: Comment = {
@@ -357,33 +352,26 @@ const MovieDetailsPage = () => {
         content: replyText,
         author: authorName.trim() || 'Anonymous',
         authorId: auth.currentUser.uid,
-        timestamp: serverTimestamp(),
+        timestamp: Date.now(),
         gifUrl: handleGifInput(newGifUrl),
-        reactions: {
-          like: {},
-          love: {},
-          laugh: {},
-          wow: {},
-          sad: {},
-        },
+        reactions: { like: {}, love: {}, laugh: {}, wow: {}, sad: {} },
         replies: [],
       };
       await update(newReplyRef, replyData);
-      // Clear reply input
-      setNewReply((prev) => ({ ...prev, [parentId]: '' }));
+      setNewReply({ ...newReply, [parentId]: '' });
       setNewGifUrl('');
       setShowGifInput(false);
       setReplyingTo(null);
       alert('Reply posted successfully!');
     } catch (error) {
       console.error('Error adding reply:', error);
-      alert('Failed to post reply. Please try again.');
+      alert('Failed to post reply. Check console for details.');
     } finally {
       setSending(false);
     }
   };
 
-  // Toggle Reaction - Update reactions for a comment or reply
+  // Toggle Reaction - Add/remove reaction for comment or reply
   const toggleReaction = async (commentId: string, reactionKey: string, isReply = false) => {
     if (!auth.currentUser || !movie?.id) {
       alert('Authentication required to react.');
@@ -392,17 +380,18 @@ const MovieDetailsPage = () => {
 
     const userId = auth.currentUser.uid;
     const pageId = `movie-${movie.id}`;
-    const baseRef = ref(db, `comments/${pageId}/${commentId}`);
-    const reactionPath = isReply ? `replies/${commentId}/reactions/${reactionKey}` : `reactions/${reactionKey}`;
+    const reactionPath = isReply ? `comments/${pageId}/${commentId}/replies/${commentId}/reactions/${reactionKey}` : `comments/${pageId}/${commentId}/reactions/${reactionKey}`;
 
     try {
-      // Get current reaction state
-      const currentSnapshot = await onValue(baseRef, (snap) => snap.val());
-      const currentData = currentSnapshot.val();
-      const currentReactions = currentData.reactions[reactionKey] || {};
+      const comment = comments.find((c) => c.id === commentId) || comments.flatMap((c) => c.replies).find((r) => r.id === commentId);
+      if (!comment) {
+        alert('Comment not found.');
+        return;
+      }
+
+      const currentReactions = comment.reactions[reactionKey] || {};
       const hasReacted = currentReactions[userId] || false;
 
-      // Update locally first for real-time feel
       setComments((prev) => {
         const updateComment = (comments: Comment[]): Comment[] => {
           return comments.map((c) => {
@@ -414,17 +403,10 @@ const MovieDetailsPage = () => {
               } else {
                 updatedReactions[reactionKey][userId] = true;
               }
-              return {
-                ...c,
-                reactions: updatedReactions,
-              };
+              return { ...c, reactions: updatedReactions };
             }
-            // Recurse for replies
             if (c.replies) {
-              return {
-                ...c,
-                replies: updateComment(c.replies),
-              };
+              return { ...c, replies: updateComment(c.replies) };
             }
             return c;
           });
@@ -432,9 +414,9 @@ const MovieDetailsPage = () => {
         return updateComment(prev);
       });
 
-      // Update in database
-      const updateData = hasReacted ? arrayRemove(userId) : arrayUnion(userId);
-      await update(ref(db, `comments/${pageId}/${commentId}/${reactionPath}`), updateData);
+      const updates: { [key: string]: any } = {};
+      updates[reactionPath] = hasReacted ? { ...currentReactions, [userId]: null } : { ...currentReactions, [userId]: true };
+      await update(ref(db, `/`), updates);
       console.log(`Toggled ${reactionKey} for ${commentId}`);
     } catch (error) {
       console.error('Error toggling reaction:', error);
@@ -442,19 +424,17 @@ const MovieDetailsPage = () => {
     }
   };
 
-  // Delete Comment or Reply - For moderation (optional, requires auth check)
+  // Delete Comment or Reply - Simple moderation
   const deleteComment = async (commentId: string, isReply = false) => {
     if (!auth.currentUser || !movie?.id) {
       alert('Authentication required to delete.');
       return;
     }
-
-    // Simple check - only allow if author matches (in production, use admin auth)
     if (confirm('Are you sure you want to delete this comment?')) {
       const pageId = `movie-${movie.id}`;
-      const commentRef = ref(db, `comments/${pageId}/${commentId}`);
+      const path = isReply ? `comments/${pageId}/${commentId}/replies/${commentId}` : `comments/${pageId}/${commentId}`;
       try {
-        await remove(commentRef);
+        await remove(ref(db, path));
         alert('Comment deleted successfully!');
       } catch (error) {
         console.error('Error deleting comment:', error);
@@ -463,17 +443,16 @@ const MovieDetailsPage = () => {
     }
   };
 
-  // Handle Play Movie - Navigate to watch page
+  // Handle Play Movie
   const handlePlayMovie = () => {
     if (movie) {
       navigate(`/watch/movie/${movie.id}`);
     }
   };
 
-  // Toggle Favorite - Add/remove from favorites
+  // Toggle Favorite
   const handleToggleFavorite = () => {
     if (!movie) return;
-
     if (isFavorite) {
       removeFromFavorites(movie.id, 'movie');
       setIsFavorite(false);
@@ -491,10 +470,9 @@ const MovieDetailsPage = () => {
     }
   };
 
-  // Toggle Watchlist - Add/remove from watchlist
+  // Toggle Watchlist
   const handleToggleWatchlist = () => {
     if (!movie) return;
-
     if (isInMyWatchlist) {
       removeFromWatchlist(movie.id, 'movie');
       setIsInMyWatchlist(false);
@@ -512,14 +490,14 @@ const MovieDetailsPage = () => {
     }
   };
 
-  // Format Runtime - Convert minutes to hours and minutes
+  // Format Runtime
   const formatRuntime = (minutes: number) => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
   };
 
-  // Render Loading State - Show loading spinner
+  // Render Loading State
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
@@ -528,7 +506,7 @@ const MovieDetailsPage = () => {
     );
   }
 
-  // Render Error State - Show error message and home button
+  // Render Error State
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background">
@@ -540,7 +518,7 @@ const MovieDetailsPage = () => {
     );
   }
 
-  // Render Not Found State - If movie is null
+  // Render Not Found State
   if (!movie) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background">
@@ -552,17 +530,14 @@ const MovieDetailsPage = () => {
     );
   }
 
-  // Main Render - Full movie details page with comments
+  // Main Render
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
 
-      {/* Backdrop Image Section - Hero with backdrop, poster, and movie info */}
+      {/* Backdrop Image Section */}
       <div className="relative w-full h-[70vh]">
-        {/* Loading Skeleton for Backdrop */}
         {!backdropLoaded && <div className="absolute inset-0 bg-background image-skeleton" />}
-        
-        {/* Back Button */}
         <button
           onClick={() => navigate(-1)}
           className="absolute top-20 left-6 z-10 text-white p-2 rounded-full bg-black/30 hover:bg-black/50 transition-colors"
@@ -570,21 +545,13 @@ const MovieDetailsPage = () => {
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
-
-        {/* Backdrop Image */}
         <img
           src={getImageUrl(movie.backdrop_path, backdropSizes.original)}
           alt={movie.title || 'Movie backdrop'}
-          className={`w-full h-full object-cover transition-opacity duration-700 ${
-            backdropLoaded ? 'opacity-100' : 'opacity-0'
-          }`}
+          className={`w-full h-full object-cover transition-opacity duration-700 ${backdropLoaded ? 'opacity-100' : 'opacity-0'}`}
           onLoad={() => setBackdropLoaded(true)}
         />
-        
-        {/* Gradient Overlay */}
         <div className="absolute inset-0 details-gradient" />
-        
-        {/* Trailer Overlay - Only on desktop */}
         {!isMobile && trailerKey && (
           <div className="absolute inset-0 bg-black/60">
             <iframe
@@ -595,11 +562,8 @@ const MovieDetailsPage = () => {
             />
           </div>
         )}
-
-        {/* Movie Info Content */}
         <div className="absolute bottom-0 left-0 right-0 p-6 md:p-12 lg:p-16">
           <div className="flex flex-col md:flex-row items-start gap-6 max-w-6xl mx-auto">
-            {/* Poster Image - Hidden on mobile */}
             <div className="hidden md:block flex-shrink-0 w-48 xl:w-64 rounded-lg overflow-hidden shadow-lg">
               <img
                 src={getImageUrl(movie.poster_path, posterSizes.medium)}
@@ -607,8 +571,6 @@ const MovieDetailsPage = () => {
                 className="w-full h-auto"
               />
             </div>
-            
-            {/* Title, Tagline, and Metadata */}
             <div className="flex-1 animate-slide-up">
               {movie.logo_path ? (
                 <div className="relative w-full max-w-[300px] md:max-w-[400px] lg:max-w-[500px] mx-auto mb-4 transition-all duration-300 ease-in-out hover:scale-105">
@@ -616,9 +578,7 @@ const MovieDetailsPage = () => {
                   <img
                     src={getImageUrl(movie.logo_path, backdropSizes.original)}
                     alt={movie.title}
-                    className={`w-full h-auto object-contain filter drop-shadow-lg transition-opacity duration-700 ease-in-out ${
-                      logoLoaded ? 'opacity-100' : 'opacity-0'
-                    }`}
+                    className={`w-full h-auto object-contain filter drop-shadow-lg transition-opacity duration-700 ease-in-out ${logoLoaded ? 'opacity-100' : 'opacity-0'}`}
                     onLoad={() => setLogoLoaded(true)}
                   />
                 </div>
@@ -628,8 +588,6 @@ const MovieDetailsPage = () => {
                 </h1>
               )}
               {movie.tagline && <p className="text-white/70 mb-4 italic text-lg">{movie.tagline}</p>}
-              
-              {/* Metadata Row - Certification, Release Date, Runtime, Rating, Genres */}
               <div className="flex flex-wrap items-center gap-4 mb-6">
                 {movie.certification && (
                   <div className="flex items-center bg-white/20 px-2 py-1 rounded">
@@ -663,11 +621,7 @@ const MovieDetailsPage = () => {
                   ))}
                 </div>
               </div>
-              
-              {/* Overview */}
               <p className="text-white/80 mb-6">{movie.overview}</p>
-              
-              {/* Action Buttons - Play, Favorite, Watchlist */}
               <div className="flex flex-wrap gap-3">
                 <Button onClick={handlePlayMovie} className="bg-accent hover:bg-accent/80 text-white flex items-center">
                   <Play className="h-4 w-4 mr-2" />
@@ -695,57 +649,36 @@ const MovieDetailsPage = () => {
         </div>
       </div>
 
-      {/* Tabs Section - About, Cast, Reviews, Downloads */}
+      {/* Tabs Section */}
       <div className="max-w-6xl mx-auto px-4 py-8">
         <div className="flex border-b border-white/10 mb-6">
           <button
-            className={`py-2 px-4 font-medium whitespace-nowrap ${
-              activeTab === 'about' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'
-            }`}
-            onClick={() => {
-              triggerHaptic();
-              setActiveTab('about');
-            }}
+            className={`py-2 px-4 font-medium whitespace-nowrap ${activeTab === 'about' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'}`}
+            onClick={() => { triggerHaptic(); setActiveTab('about'); }}
           >
             About
           </button>
           <button
-            className={`py-2 px-4 font-medium whitespace-nowrap ${
-              activeTab === 'cast' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'
-            }`}
-            onClick={() => {
-              triggerHaptic();
-              setActiveTab('cast');
-            }}
+            className={`py-2 px-4 font-medium whitespace-nowrap ${activeTab === 'cast' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'}`}
+            onClick={() => { triggerHaptic(); setActiveTab('cast'); }}
           >
             Cast
           </button>
           <button
-            className={`py-2 px-4 font-medium whitespace-nowrap ${
-              activeTab === 'reviews' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'
-            }`}
-            onClick={() => {
-              triggerHaptic();
-              setActiveTab('reviews');
-            }}
+            className={`py-2 px-4 font-medium whitespace-nowrap ${activeTab === 'reviews' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'}`}
+            onClick={() => { triggerHaptic(); setActiveTab('reviews'); }}
           >
             Reviews
           </button>
           <button
-            className={`py-2 px-4 font-medium whitespace-nowrap ${
-              activeTab === 'downloads' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'
-            }`}
-            onClick={() => {
-              triggerHaptic();
-              setActiveTab('downloads');
-            }}
+            className={`py-2 px-4 font-medium whitespace-nowrap ${activeTab === 'downloads' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'}`}
+            onClick={() => { triggerHaptic(); setActiveTab('downloads'); }}
             style={{ display: user ? undefined : 'none' }}
           >
             Downloads
           </button>
         </div>
 
-        {/* About Tab - Status, Budget, Revenue, Production Companies */}
         {activeTab === 'about' ? (
           <>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -755,15 +688,11 @@ const MovieDetailsPage = () => {
               </div>
               <div className="glass p-6 rounded-xl">
                 <h3 className="text-lg font-semibold text-white mb-3">Budget</h3>
-                <p className="text-white/80">
-                  {movie.budget > 0 ? `$${movie.budget.toLocaleString()}` : 'Not available'}
-                </p>
+                <p className="text-white/80">{movie.budget > 0 ? `$${movie.budget.toLocaleString()}` : 'Not available'}</p>
               </div>
               <div className="glass p-6 rounded-xl">
                 <h3 className="text-lg font-semibold text-white mb-3">Revenue</h3>
-                <p className="text-white/80">
-                  {movie.revenue > 0 ? `$${movie.revenue.toLocaleString()}` : 'Not available'}
-                </p>
+                <p className="text-white/80">{movie.revenue > 0 ? `$${movie.revenue.toLocaleString()}` : 'Not available'}</p>
               </div>
             </div>
             {movie.production_companies.length > 0 && (
@@ -774,11 +703,7 @@ const MovieDetailsPage = () => {
                     <div key={company.id} className="text-center">
                       {company.logo_path ? (
                         <div className="bg-white/10 p-3 rounded-lg w-24 h-16 flex items-center justify-center mb-2">
-                          <img
-                            src={getImageUrl(company.logo_path, posterSizes.small)}
-                            alt={company.name}
-                            className="max-w-full max-h-full"
-                          />
+                          <img src={getImageUrl(company.logo_path, posterSizes.small)} alt={company.name} className="max-w-full max-h-full" />
                         </div>
                       ) : (
                         <div className="bg-white/10 p-3 rounded-lg w-24 h-16 flex items-center justify-center mb-2">
@@ -800,11 +725,7 @@ const MovieDetailsPage = () => {
                 {cast.map((member) => (
                   <div key={member.id} className="w-32 text-center">
                     {member.profile_path ? (
-                      <img
-                        src={getImageUrl(member.profile_path, 'w185')}
-                        alt={member.name}
-                        className="rounded-lg w-24 h-32 object-cover mx-auto mb-2"
-                      />
+                      <img src={getImageUrl(member.profile_path, 'w185')} alt={member.name} className="rounded-lg w-24 h-32 object-cover mx-auto mb-2" />
                     ) : (
                       <div className="rounded-lg w-24 h-32 bg-white/10 flex items-center justify-center mx-auto mb-2 text-white/60 text-xs">
                         No Image
@@ -832,17 +753,15 @@ const MovieDetailsPage = () => {
         )}
       </div>
 
-      {/* Recommendations Section - More Like This */}
-      {recommendations.length > 0 && (
-        <ContentRow title="More Like This" media={recommendations} />
-      )}
+      {/* Recommendations Section */}
+      {recommendations.length > 0 && <ContentRow title="More Like This" media={recommendations} />}
 
-      {/* Advanced Comments Section - Threaded comments with replies, emojis, GIFs */}
+      {/* Comments Section */}
       {movie && (
         <div className="max-w-6xl mx-auto px-4 py-8">
           <h3 className="text-xl font-semibold text-white mb-4">Comments</h3>
           <div className="space-y-4">
-            {/* Main Comment Form - For top-level comments */}
+            {/* Comment Form */}
             <div className="glass p-4 rounded-lg">
               <div className="flex gap-2 mb-2">
                 <User className="h-5 w-5 text-white/50 mt-1" />
@@ -871,7 +790,6 @@ const MovieDetailsPage = () => {
                   {sending ? 'Sending...' : <Send className="h-4 w-4" />}
                 </Button>
               </div>
-              {/* GIF Input - Simple URL input for GIFs */}
               {showGifInput && (
                 <div className="flex gap-2 mb-2">
                   <input
@@ -883,10 +801,7 @@ const MovieDetailsPage = () => {
                     maxLength={200}
                     disabled={!authReady}
                   />
-                  <Button onClick={() => {
-                    setShowGifInput(false);
-                    setNewGifUrl('');
-                  }} variant="outline" disabled={!authReady}>
+                  <Button onClick={() => { setShowGifInput(false); setNewGifUrl(''); }} variant="outline" disabled={!authReady}>
                     Cancel
                   </Button>
                 </div>
@@ -901,7 +816,7 @@ const MovieDetailsPage = () => {
               {!authReady && <p className="text-white/50 text-sm mt-2">Initializing authentication...</p>}
             </div>
 
-            {/* Comments List - Render threaded comments with replies */}
+            {/* Comments List */}
             <div className="space-y-4">
               {commentsLoading ? (
                 <p className="text-white/70 text-center">Loading comments...</p>
@@ -918,15 +833,10 @@ const MovieDetailsPage = () => {
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-medium text-white">{comment.author || 'Anonymous'}</span>
                           <Clock className="h-3 w-3 text-white/50" />
-                          <span className="text-xs text-white/50">
-                            {formatTimestamp(comment.timestamp)}
-                          </span>
+                          <span className="text-xs text-white/50">{formatTimestamp(comment.timestamp)}</span>
                         </div>
                         <p className="text-white mb-3">{comment.content}</p>
-                        {comment.gifUrl && (
-                          <img src={comment.gifUrl} alt="GIF" className="max-w-32 rounded mb-3" />
-                        )}
-                        {/* Reactions for Main Comment */}
+                        {comment.gifUrl && <img src={comment.gifUrl} alt="GIF" className="max-w-32 rounded mb-3" />}
                         <div className="flex items-center gap-2 mb-3">
                           {emojiReactions.map(({ key, emoji, label }) => (
                             <button
@@ -941,7 +851,6 @@ const MovieDetailsPage = () => {
                             </button>
                           ))}
                         </div>
-                        {/* Delete Button - Simple moderation */}
                         <button
                           onClick={() => deleteComment(comment.id)}
                           className="text-red-400 text-xs hover:text-red-300 mr-2"
@@ -949,7 +858,6 @@ const MovieDetailsPage = () => {
                         >
                           Delete
                         </button>
-                        {/* Reply Button */}
                         <button
                           onClick={() => setReplyingTo(comment.id)}
                           className="text-white/70 text-xs hover:text-white flex items-center gap-1"
@@ -960,8 +868,6 @@ const MovieDetailsPage = () => {
                         </button>
                       </div>
                     </div>
-                    
-                    {/* Reply Form - If replying to this comment */}
                     {replyingTo === comment.id && (
                       <div className="mt-4 p-3 bg-white/5 rounded">
                         <input
@@ -982,10 +888,7 @@ const MovieDetailsPage = () => {
                             {sending ? 'Sending...' : 'Reply'}
                           </Button>
                           <Button
-                            onClick={() => {
-                              setNewReply({ ...newReply, [comment.id]: '' });
-                              setReplyingTo(null);
-                            }}
+                            onClick={() => { setNewReply({ ...newReply, [comment.id]: '' }); setReplyingTo(null); }}
                             variant="outline"
                             size="sm"
                           >
@@ -994,8 +897,6 @@ const MovieDetailsPage = () => {
                         </div>
                       </div>
                     )}
-
-                    {/* Nested Replies - Recursively render replies */}
                     {comment.replies && comment.replies.length > 0 && (
                       <div className="ml-8 mt-4 space-y-2">
                         {comment.replies.map((reply) => (
@@ -1008,15 +909,10 @@ const MovieDetailsPage = () => {
                                 <div className="flex items-center gap-1 mb-1">
                                   <span className="font-medium text-white text-sm">{reply.author || 'Anonymous'}</span>
                                   <Clock className="h-2 w-2 text-white/50" />
-                                  <span className="text-xs text-white/50">
-                                    {formatTimestamp(reply.timestamp)}
-                                  </span>
+                                  <span className="text-xs text-white/50">{formatTimestamp(reply.timestamp)}</span>
                                 </div>
                                 <p className="text-white text-sm mb-2">{reply.content}</p>
-                                {reply.gifUrl && (
-                                  <img src={reply.gifUrl} alt="GIF" className="max-w-24 rounded mb-2" />
-                                )}
-                                {/* Reactions for Reply */}
+                                {reply.gifUrl && <img src={reply.gifUrl} alt="GIF" className="max-w-24 rounded mb-2" />}
                                 <div className="flex items-center gap-1 mb-2">
                                   {emojiReactions.map(({ key, emoji, label }) => (
                                     <button
@@ -1031,7 +927,6 @@ const MovieDetailsPage = () => {
                                     </button>
                                   ))}
                                 </div>
-                                {/* Delete Reply */}
                                 <button
                                   onClick={() => deleteComment(reply.id, true)}
                                   className="text-red-400 text-xs hover:text-red-300 mr-2"
@@ -1039,7 +934,6 @@ const MovieDetailsPage = () => {
                                 >
                                   Delete
                                 </button>
-                                {/* Reply to Reply Button */}
                                 <button
                                   onClick={() => setReplyingTo(reply.id)}
                                   className="text-white/70 text-xs hover:text-white flex items-center gap-1"
@@ -1050,8 +944,35 @@ const MovieDetailsPage = () => {
                                 </button>
                               </div>
                             </div>
-                            
-                            {/* Nested Replies for this Reply */}
+                            {replyingTo === reply.id && (
+                              <div className="mt-2 p-2 bg-white/5 rounded">
+                                <input
+                                  type="text"
+                                  placeholder="Reply to this reply..."
+                                  value={newReply[reply.id] || ''}
+                                  onChange={(e) => setNewReply({ ...newReply, [reply.id]: e.target.value })}
+                                  className="w-full bg-transparent text-white placeholder-white/50 border-b border-white/20 focus:outline-none mb-2"
+                                  maxLength={500}
+                                  disabled={!authReady}
+                                />
+                                <div className="flex gap-2">
+                                  <Button
+                                    onClick={() => sendReply(reply.id)}
+                                    disabled={sending || !newReply[reply.id]?.trim() || !authReady}
+                                    size="sm"
+                                  >
+                                    {sending ? 'Sending...' : 'Reply'}
+                                  </Button>
+                                  <Button
+                                    onClick={() => { setNewReply({ ...newReply, [reply.id]: '' }); setReplyingTo(null); }}
+                                    variant="outline"
+                                    size="sm"
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
                             {reply.replies && reply.replies.length > 0 && (
                               <div className="ml-4 mt-2 space-y-1">
                                 {reply.replies.map((subReply) => (
@@ -1064,14 +985,10 @@ const MovieDetailsPage = () => {
                                         <div className="flex items-center gap-1">
                                           <span className="font-medium text-white text-xs">{subReply.author || 'Anonymous'}</span>
                                           <Clock className="h-1.5 w-1.5 text-white/50" />
-                                          <span className="text-xs text-white/50">
-                                            {formatTimestamp(subReply.timestamp)}
-                                          </span>
+                                          <span className="text-xs text-white/50">{formatTimestamp(subReply.timestamp)}</span>
                                         </div>
                                         <p className="text-white text-xs">{subReply.content}</p>
-                                        {subReply.gifUrl && (
-                                          <img src={subReply.gifUrl} alt="GIF" className="max-w-16 rounded" />
-                                        )}
+                                        {subReply.gifUrl && <img src={subReply.gifUrl} alt="GIF" className="max-w-16 rounded" />}
                                       </div>
                                     </div>
                                   </div>
