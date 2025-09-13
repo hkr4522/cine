@@ -1,45 +1,123 @@
-// src/pages/TVDetailsPage.tsx
-import { useState, useEffect, useCallback } from 'react';
+// src/pages/TVShowDetailsPage.tsx
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, Download, Share2 } from 'lucide-react';
+import { ArrowLeft, Play, Download, Share2, Heart, Bookmark } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import ContentRow from '@/components/ContentRow';
 import Navbar from '@/components/Navbar';
 import ReviewSection from '@/components/ReviewSection';
-import TVShowHeader from '@/components/tv/TVShowHeader';
-import TVShowEpisodes from '@/components/tv/TVShowEpisodes';
 import TVShowAbout from '@/components/tv/TVShowAbout';
 import TVShowCast from '@/components/tv/TVShowCast';
+import TVDownloadSection from '@/components/tv/TVDownloadSection';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useTVDetails } from '@/hooks/use-tv-details';
-import { DownloadSection } from '@/components/DownloadSection';
-import { TVDownloadSection } from '@/components/tv/TVDownloadSection';
 import { useAuth } from '@/hooks';
 import { useHaptic } from '@/hooks/useHaptic';
 import { TVShow, Season, Episode, LastWatchedEpisode } from '@/utils/types';
+import { getImageUrl } from '@/utils/services/tmdb';
 
 // Type Definitions
 type TabType = 'episodes' | 'about' | 'cast' | 'reviews' | 'downloads';
 interface Toast {
   message: string;
   isError: boolean;
+  id: string;
+}
+interface TVShowHeaderProps {
+  tvShow: TVShow;
+  isFavorite: boolean;
+  isInWatchlist: boolean;
+  onToggleFavorite: () => void;
+  onToggleWatchlist: () => void;
+  onPlayEpisode: (seasonNumber: number, episodeNumber: number) => void;
+  lastWatchedEpisode: LastWatchedEpisode | null;
+  onShare: () => void;
+  onDownload: () => void;
+  onWatchLatestEpisode: () => void;
+  onDownloadLatestEpisode: () => void;
+}
+interface EpisodeProps {
+  seasons: Season[];
+  episodes: Episode[];
+  selectedSeason: number;
+  onSeasonChange: (seasonNumber: number) => void;
+  onPlayEpisode: (seasonNumber: number, episodeNumber: number) => void;
+  onDownloadEpisode: (seasonNumber: number, episodeNumber: number) => void;
 }
 
+// Helper Function: Generate unique ID for toasts
+const generateToastId = (): string => {
+  return Math.random().toString(36).substring(2, 9);
+};
+
+// Helper Function: Validate TV show data
+const validateTVShowData = (tvShow: TVShow | null): boolean => {
+  if (!tvShow) {
+    console.error('TV show data is null');
+    return false;
+  }
+  if (!tvShow.id || !tvShow.name || !tvShow.seasons || tvShow.seasons.length === 0) {
+    console.error('Invalid TV show data:', { id: tvShow.id, name: tvShow.name, seasons: tvShow.seasons });
+    return false;
+  }
+  return true;
+};
+
+// Helper Function: Validate episodes data
+const validateEpisodesData = (episodes: Episode[] | null): boolean => {
+  if (!episodes || episodes.length === 0) {
+    console.warn('Episodes array is empty or null');
+    return false;
+  }
+  const isValid = episodes.every((ep) => ep.season_number && ep.episode_number);
+  if (!isValid) {
+    console.warn('Invalid episodes data detected');
+  }
+  return isValid;
+};
+
+// Helper Function: Get latest episode
+const getLatestEpisode = (seasons: Season[], episodes: Episode[]): Episode | null => {
+  try {
+    if (!seasons.length || !episodes.length) {
+      console.warn('No seasons or episodes available for latest episode calculation');
+      return null;
+    }
+    const latestSeason = seasons.reduce(
+      (max: Season, season: Season) => (season.season_number > max.season_number ? season : max),
+      seasons[0]
+    );
+    const latestEpisodes = episodes.filter((ep: Episode) => ep.season_number === latestSeason.season_number);
+    const latestEpisode = latestEpisodes[latestEpisodes.length - 1];
+    if (!latestEpisode) {
+      console.warn('No episodes found for the latest season');
+      return null;
+    }
+    return latestEpisode;
+  } catch (err) {
+    console.error('Error getting latest episode:', err);
+    return null;
+  }
+};
+
 // Main Component
-const TVDetailsPage = () => {
+const TVShowDetailsPage = () => {
   // Navigation and URL params
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { user } = useAuth();
   const { triggerHaptic } = useHaptic();
+  const commentoScriptRef = useRef<HTMLScriptElement | null>(null);
 
   // State Management
   const [activeTab, setActiveTab] = useState<TabType>('episodes');
   const [showDownloadOverlay, setShowDownloadOverlay] = useState(false);
   const [selectedSeasonNumber, setSelectedSeasonNumber] = useState<number | null>(null);
   const [selectedEpisodeNumber, setSelectedEpisodeNumber] = useState<number | null>(null);
-  const [showToast, setShowToast] = useState<Toast | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [isCommentoLoaded, setIsCommentoLoaded] = useState(false);
+  const [expandedEpisodes, setExpandedEpisodes] = useState<number[]>([]);
 
   // Fetch TV show details
   const {
@@ -60,12 +138,26 @@ const TVDetailsPage = () => {
     getLastWatchedEpisode,
   } = useTVDetails(id);
 
+  // Memoized validation of TV show and episodes
+  const isTVShowValid = useMemo(() => validateTVShowData(tvShow), [tvShow]);
+  const isEpisodesValid = useMemo(() => validateEpisodesData(episodes), [episodes]);
+
+  // Add toast notification
+  const addToast = useCallback((message: string, isError: boolean) => {
+    const toast: Toast = { message, isError, id: generateToastId() };
+    setToasts((prev) => [...prev, toast]);
+    console.log(`Added toast: ${message}, isError: ${isError}, ID: ${toast.id}`);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== toast.id));
+      console.log(`Removed toast: ${message}, ID: ${toast.id}`);
+    }, 3000);
+  }, []);
+
   // Initialize Download Overlay
   useEffect(() => {
-    if (!tvShow || !episodes || episodes.length === 0) {
-      console.warn('No TV show or episodes data available for initialization');
-      setShowToast({ message: 'No episodes available for download.', isError: true });
-      setTimeout(() => setShowToast(null), 3000);
+    if (!isTVShowValid || !isEpisodesValid) {
+      console.warn('Cannot initialize download overlay: Invalid TV show or episodes data');
+      addToast('No episodes available for download.', true);
       return;
     }
 
@@ -78,38 +170,29 @@ const TVDetailsPage = () => {
           `Initialized download overlay with last watched - Season: ${lastWatched.season_number}, Episode: ${lastWatched.episode_number}`
         );
       } else {
-        const latestSeason = tvShow.seasons.reduce(
-          (max: Season, season: Season) =>
-            season.season_number > max.season_number ? season : max,
-          tvShow.seasons[0]
-        );
-        const latestEpisodes = episodes.filter(
-          (ep: Episode) => ep.season_number === latestSeason.season_number
-        );
-        const latestEpisode = latestEpisodes[latestEpisodes.length - 1];
+        const latestEpisode = getLatestEpisode(tvShow.seasons, episodes);
         if (latestEpisode) {
-          setSelectedSeasonNumber(latestSeason.season_number);
+          setSelectedSeasonNumber(latestEpisode.season_number);
           setSelectedEpisodeNumber(latestEpisode.episode_number);
           console.log(
-            `Initialized download overlay with latest episode - Season: ${latestSeason.season_number}, Episode: ${latestEpisode.episode_number}`
+            `Initialized download overlay with latest episode - Season: ${latestEpisode.season_number}, Episode: ${latestEpisode.episode_number}`
           );
         } else {
-          console.warn('No episodes found for latest season');
-          setShowToast({ message: 'No episodes available for download.', isError: true });
-          setTimeout(() => setShowToast(null), 3000);
+          console.warn('No valid episodes found for initialization');
+          addToast('No episodes available for download.', true);
         }
       }
     } catch (err) {
       console.error('Error initializing download overlay:', err);
-      setShowToast({ message: 'Failed to initialize download options.', isError: true });
-      setTimeout(() => setShowToast(null), 3000);
+      addToast('Failed to initialize download options.', true);
     }
-  }, [tvShow, episodes, getLastWatchedEpisode]);
+  }, [tvShow, episodes, getLastWatchedEpisode, isTVShowValid, isEpisodesValid, addToast]);
 
   // Initialize Commento
   useEffect(() => {
     if (!tvShow?.id) {
       console.warn('No TV show ID for Commento initialization');
+      addToast('Cannot load comments: No TV show data.', true);
       return;
     }
 
@@ -126,42 +209,41 @@ const TVDetailsPage = () => {
         const commentoDiv = document.getElementById('commento');
         if (commentoDiv) {
           commentoDiv.setAttribute('data-page-id', pageId);
+          setIsCommentoLoaded(true);
           console.log(`Commento initialized with data-page-id: ${pageId}`);
         } else {
           console.error('Commento div not found');
-          setShowToast({ message: 'Failed to initialize comments.', isError: true });
-          setTimeout(() => setShowToast(null), 3000);
+          addToast('Failed to initialize comments.', true);
         }
       };
       script.onerror = () => {
         console.error('Failed to load Commento script');
-        setShowToast({ message: 'Failed to load comments system.', isError: true });
-        setTimeout(() => setShowToast(null), 3000);
+        addToast('Failed to load comments system.', true);
       };
 
       const target = document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0];
       target.appendChild(script);
+      commentoScriptRef.current = script;
       console.log('Commento script appended to document');
 
       return () => {
-        if (script.parentNode) {
-          script.parentNode.removeChild(script);
+        if (commentoScriptRef.current && commentoScriptRef.current.parentNode) {
+          commentoScriptRef.current.parentNode.removeChild(commentoScriptRef.current);
           console.log('Commento script removed');
+          setIsCommentoLoaded(false);
         }
       };
     } catch (err) {
       console.error('Error initializing Commento:', err);
-      setShowToast({ message: 'Error loading comments system.', isError: true });
-      setTimeout(() => setShowToast(null), 3000);
+      addToast('Error loading comments system.', true);
     }
-  }, [tvShow?.id]);
+  }, [tvShow?.id, addToast]);
 
   // Handle Share
   const handleShare = useCallback(async () => {
-    if (!tvShow) {
-      console.error('No TV show data for sharing');
-      setShowToast({ message: 'No TV show data available.', isError: true });
-      setTimeout(() => setShowToast(null), 3000);
+    if (!isTVShowValid) {
+      console.error('No valid TV show data for sharing');
+      addToast('No TV show data available.', true);
       return;
     }
 
@@ -177,101 +259,77 @@ const TVDetailsPage = () => {
         await navigator.share(shareData);
         triggerHaptic();
         console.log(`Shared TV show ${tvShow.id} via Web Share API: ${shareUrl}`);
+        addToast('Shared successfully!', false);
       } else {
         await navigator.clipboard.writeText(shareUrl);
         triggerHaptic();
-        setShowToast({ message: 'Link copied to clipboard!', isError: false });
+        addToast('Link copied to clipboard!', false);
         console.log(`Copied TV show ${tvShow.id} URL to clipboard: ${shareUrl}`);
-        setTimeout(() => setShowToast(null), 3000);
       }
     } catch (error) {
       console.error('Error sharing TV show:', error);
-      setShowToast({ message: 'Failed to share. Please try again.', isError: true });
-      setTimeout(() => setShowToast(null), 3000);
+      addToast('Failed to share. Please try again.', true);
     }
-  }, [tvShow, triggerHaptic]);
+  }, [tvShow, isTVShowValid, triggerHaptic, addToast]);
 
   // Handle Watch Latest Episode
   const handleWatchLatestEpisode = useCallback(() => {
-    if (!tvShow || !episodes || episodes.length === 0) {
-      console.warn('No TV show or episodes data for playing latest episode');
-      setShowToast({ message: 'No episodes available.', isError: true });
-      setTimeout(() => setShowToast(null), 3000);
+    if (!isTVShowValid || !isEpisodesValid) {
+      console.warn('No valid TV show or episodes data for playing latest episode');
+      addToast('No episodes available.', true);
       return;
     }
 
     try {
-      const latestSeason = tvShow.seasons.reduce(
-        (max: Season, season: Season) =>
-          season.season_number > max.season_number ? season : max,
-        tvShow.seasons[0]
-      );
-      const latestEpisodes = episodes.filter(
-        (ep: Episode) => ep.season_number === latestSeason.season_number
-      );
-      const latestEpisode = latestEpisodes[latestEpisodes.length - 1];
+      const latestEpisode = getLatestEpisode(tvShow.seasons, episodes);
       if (latestEpisode) {
-        handlePlayEpisode(latestSeason.season_number, latestEpisode.episode_number);
+        handlePlayEpisode(latestEpisode.season_number, latestEpisode.episode_number);
         console.log(
-          `Playing latest episode - TV show ID: ${tvShow.id}, Season: ${latestSeason.season_number}, Episode: ${latestEpisode.episode_number}`
+          `Playing latest episode - TV show ID: ${tvShow.id}, Season: ${latestEpisode.season_number}, Episode: ${latestEpisode.episode_number}`
         );
       } else {
         console.warn('No latest episode found');
-        setShowToast({ message: 'No latest episode available.', isError: true });
-        setTimeout(() => setShowToast(null), 3000);
+        addToast('No latest episode available.', true);
       }
     } catch (err) {
       console.error('Error playing latest episode:', err);
-      setShowToast({ message: 'Failed to play latest episode.', isError: true });
-      setTimeout(() => setShowToast(null), 3000);
+      addToast('Failed to play latest episode.', true);
     }
-  }, [tvShow, episodes, handlePlayEpisode]);
+  }, [tvShow, episodes, isTVShowValid, isEpisodesValid, handlePlayEpisode, addToast]);
 
   // Handle Download Latest Episode
   const handleDownloadLatestEpisode = useCallback(() => {
-    if (!tvShow || !episodes || episodes.length === 0) {
-      console.warn('No TV show or episodes data for download');
-      setShowToast({ message: 'No episodes available for download.', isError: true });
-      setTimeout(() => setShowToast(null), 3000);
+    if (!isTVShowValid || !isEpisodesValid) {
+      console.warn('No valid TV show or episodes data for download');
+      addToast('No episodes available for download.', true);
       return;
     }
 
     try {
-      const latestSeason = tvShow.seasons.reduce(
-        (max: Season, season: Season) =>
-          season.season_number > max.season_number ? season : max,
-        tvShow.seasons[0]
-      );
-      const latestEpisodes = episodes.filter(
-        (ep: Episode) => ep.season_number === latestSeason.season_number
-      );
-      const latestEpisode = latestEpisodes[latestEpisodes.length - 1];
+      const latestEpisode = getLatestEpisode(tvShow.seasons, episodes);
       if (latestEpisode) {
-        setSelectedSeasonNumber(latestSeason.season_number);
+        setSelectedSeasonNumber(latestEpisode.season_number);
         setSelectedEpisodeNumber(latestEpisode.episode_number);
         setShowDownloadOverlay(true);
         triggerHaptic();
         console.log(
-          `Opened download overlay for latest episode - TV show ID: ${tvShow.id}, Season: ${latestSeason.season_number}, Episode: ${latestEpisode.episode_number}`
+          `Opened download overlay for latest episode - TV show ID: ${tvShow.id}, Season: ${latestEpisode.season_number}, Episode: ${latestEpisode.episode_number}`
         );
       } else {
         console.warn('No latest episode found for download');
-        setShowToast({ message: 'No latest episode available for download.', isError: true });
-        setTimeout(() => setShowToast(null), 3000);
+        addToast('No latest episode available for download.', true);
       }
     } catch (err) {
       console.error('Error opening download overlay for latest episode:', err);
-      setShowToast({ message: 'Failed to open download overlay.', isError: true });
-      setTimeout(() => setShowToast(null), 3000);
+      addToast('Failed to open download overlay.', true);
     }
-  }, [tvShow, episodes, triggerHaptic]);
+  }, [tvShow, episodes, isTVShowValid, isEpisodesValid, triggerHaptic, addToast]);
 
   // Handle Download for specific episode
   const handleOpenDownload = useCallback(() => {
-    if (!tvShow || !selectedSeasonNumber || !selectedEpisodeNumber) {
+    if (!isTVShowValid || !selectedSeasonNumber || !selectedEpisodeNumber) {
       console.warn('Invalid TV show, season, or episode for download');
-      setShowToast({ message: 'Please select a valid season and episode.', isError: true });
-      setTimeout(() => setShowToast(null), 3000);
+      addToast('Please select a valid season and episode.', true);
       return;
     }
 
@@ -280,7 +338,7 @@ const TVDetailsPage = () => {
     console.log(
       `Opened download overlay for TV show ID: ${tvShow.id}, Season: ${selectedSeasonNumber}, Episode: ${selectedEpisodeNumber}`
     );
-  }, [tvShow, selectedSeasonNumber, selectedEpisodeNumber, triggerHaptic]);
+  }, [tvShow, selectedSeasonNumber, selectedEpisodeNumber, isTVShowValid, triggerHaptic, addToast]);
 
   // Handle Close Download Overlay
   const handleCloseDownload = useCallback(() => {
@@ -291,10 +349,9 @@ const TVDetailsPage = () => {
 
   // Handle Play Episode in Download Overlay
   const handlePlayEpisodeInOverlay = useCallback(() => {
-    if (!tvShow || !selectedSeasonNumber || !selectedEpisodeNumber) {
+    if (!isTVShowValid || !selectedSeasonNumber || !selectedEpisodeNumber) {
       console.warn('Invalid TV show, season, or episode for playback');
-      setShowToast({ message: 'Please select a valid season and episode.', isError: true });
-      setTimeout(() => setShowToast(null), 3000);
+      addToast('Please select a valid season and episode.', true);
       return;
     }
 
@@ -302,294 +359,548 @@ const TVDetailsPage = () => {
     console.log(
       `Playing TV show ${tvShow.id}, Season: ${selectedSeasonNumber}, Episode: ${selectedEpisodeNumber}`
     );
-  }, [tvShow, selectedSeasonNumber, selectedEpisodeNumber, handlePlayEpisode]);
+  }, [tvShow, selectedSeasonNumber, selectedEpisodeNumber, isTVShowValid, handlePlayEpisode, addToast]);
 
-  // Render Loading State
-  if (isLoading) {
+  // TV Show Header Component (Inline)
+  const TVShowHeader = ({
+    tvShow,
+    isFavorite,
+    isInWatchlist,
+    onToggleFavorite,
+    onToggleWatchlist,
+    onPlayEpisode,
+    lastWatchedEpisode,
+    onShare,
+    onDownload,
+    onWatchLatestEpisode,
+    onDownloadLatestEpisode,
+  }: TVShowHeaderProps) => {
+    const handlePlayLastWatched = useCallback(() => {
+      try {
+        if (lastWatchedEpisode) {
+          onPlayEpisode(lastWatchedEpisode.season_number, lastWatchedEpisode.episode_number);
+          console.log(
+            `Playing last watched episode - Season: ${lastWatchedEpisode.season_number}, Episode: ${lastWatchedEpisode.episode_number}`
+          );
+        } else if (tvShow.seasons.length > 0) {
+          onPlayEpisode(tvShow.seasons[0].season_number, 1);
+          console.log(`Playing first episode - Season: ${tvShow.seasons[0].season_number}, Episode: 1`);
+        } else {
+          console.warn('No seasons available for playback');
+          addToast('No episodes available to play.', true);
+        }
+      } catch (err) {
+        console.error('Error playing episode:', err);
+        addToast('Failed to play episode.', true);
+      }
+    }, [lastWatchedEpisode, onPlayEpisode, tvShow.seasons, addToast]);
+
     return (
-      <div className="flex items-center justify-center min-h-screen bg-background">
-        <div className="animate-pulse-slow text-white font-medium">Loading TV show details...</div>
-      </div>
-    );
-  }
-
-  // Render Error State
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-background">
-        <h1 className="text-2xl text-white mb-4">Error: {error}</h1>
-        <Button onClick={() => navigate('/')} variant="outline">
-          Return to Home
-        </Button>
-      </div>
-    );
-  }
-
-  // Render Not Found State
-  if (!tvShow) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-background">
-        <h1 className="text-2xl text-white mb-4">TV Show not found</h1>
-        <Button onClick={() => navigate('/')} variant="outline">
-          Return to Home
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Navbar */}
-      <Navbar />
-
-      {/* Toast Notification */}
-      {showToast && (
-        <div
-          className={`fixed top-5 left-1/2 transform -translate-x-1/2 z-[1000] px-6 py-3 rounded-lg text-white text-sm font-medium shadow-lg transition-opacity duration-300 ${
-            showToast.isError ? 'bg-red-600 border-red-400' : 'bg-background border-white/20'
-          } animate-fade-in`}
-        >
-          {showToast.message}
-        </div>
-      )}
-
-      {/* Header Section */}
-      <div className="relative">
-        {/* Back Button */}
-        <button
-          onClick={() => {
-            navigate(-1);
-            triggerHaptic();
-            console.log('Navigated back from TVDetailsPage');
+      <div className="relative w-full h-[70vh]">
+        {/* Backdrop Image */}
+        <img
+          src={getImageUrl(tvShow.backdrop_path, 'original')}
+          alt={tvShow.name || 'TV Show backdrop'}
+          className="w-full h-full object-cover"
+          onError={() => {
+            console.error('Failed to load backdrop image');
+            addToast('Failed to load backdrop image.', true);
           }}
-          className="absolute top-20 left-6 z-10 text-white p-2 rounded-full bg-black/30 hover:bg-black/50 transition-colors"
-          aria-label="Go back"
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </button>
-
-        {/* Trailer Background (Desktop Only) */}
-        {!isMobile && trailerKey && (
-          <div className="absolute inset-0 bg-black/60">
-            <iframe
-              className="w-full h-full"
-              src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1&mute=1&controls=0&modestbranding=1&loop=1&playlist=${trailerKey}`}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-              title="TV Show Trailer"
-              onLoad={() => console.log('Trailer iframe loaded')}
-              onError={() => {
-                console.error('Failed to load trailer iframe');
-                setShowToast({ message: 'Failed to load trailer.', isError: true });
-                setTimeout(() => setShowToast(null), 3000);
-              }}
-            />
-          </div>
-        )}
-
-        {/* TV Show Header */}
-        <TVShowHeader
-          tvShow={tvShow}
-          isFavorite={isFavorite}
-          isInWatchlist={isInMyWatchlist}
-          onToggleFavorite={handleToggleFavorite}
-          onToggleWatchlist={handleToggleWatchlist}
-          onPlayEpisode={handlePlayEpisode}
-          lastWatchedEpisode={getLastWatchedEpisode()}
-          onShare={handleShare}
-          onDownload={handleOpenDownload}
-          onWatchLatestEpisode={handleWatchLatestEpisode}
-          onDownloadLatestEpisode={handleDownloadLatestEpisode}
         />
-      </div>
-
-      {/* Download Overlay */}
-      {showDownloadOverlay && tvShow && selectedSeasonNumber && selectedEpisodeNumber && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-          <div className="relative bg-background rounded-lg shadow-xl w-full max-w-4xl p-6">
-            {/* Close Button */}
-            <button
-              onClick={handleCloseDownload}
-              className="absolute top-4 right-4 text-white p-2 rounded-full bg-black/50 hover:bg-black/70 transition-colors"
-              aria-label="Close download overlay"
-            >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-
-            {/* Security Message */}
-            <p className="text-white text-center mb-4">
-              Please solve this due to security requirements
-            </p>
-
-            {/* Season and Episode Selectors */}
-            <div className="flex flex-wrap gap-4 mb-4">
-              <select
-                value={selectedSeasonNumber}
-                onChange={(e) => {
-                  try {
-                    const seasonNum = parseInt(e.target.value, 10);
-                    setSelectedSeasonNumber(seasonNum);
-                    const seasonEpisodes = episodes.filter((ep: Episode) => ep.season_number === seasonNum);
-                    const firstEpisode = seasonEpisodes[0]?.episode_number || 1;
-                    setSelectedEpisodeNumber(firstEpisode);
-                    console.log(`Selected Season: ${seasonNum}, Episode: ${firstEpisode}`);
-                  } catch (err) {
-                    console.error('Error selecting season:', err);
-                    setShowToast({ message: 'Failed to select season.', isError: true });
-                    setTimeout(() => setShowToast(null), 3000);
-                  }
+        <div className="absolute inset-0 details-gradient" />
+        <div className="absolute bottom-0 left-0 right-0 p-6 md:p-12 lg:p-16">
+          <div className="flex flex-col md:flex-row items-start gap-6 max-w-6xl mx-auto">
+            {/* Poster Image (Desktop Only) */}
+            <div className="hidden md:block flex-shrink-0 w-48 xl:w-64 rounded-lg overflow-hidden shadow-lg">
+              <img
+                src={getImageUrl(tvShow.poster_path, 'w342')}
+                alt={tvShow.name || 'TV Show poster'}
+                className="w-full h-auto"
+                onError={() => {
+                  console.error('Failed to load poster image');
+                  addToast('Failed to load poster image.', true);
                 }}
-                className="bg-background border border-white/20 text-white rounded px-3 py-2"
-              >
-                {tvShow.seasons.map((season: Season) => (
-                  <option key={season.season_number} value={season.season_number}>
-                    Season {season.season_number}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={selectedEpisodeNumber}
-                onChange={(e) => {
-                  try {
-                    const epNum = parseInt(e.target.value, 10);
-                    setSelectedEpisodeNumber(epNum);
-                    console.log(`Selected Episode: ${epNum}`);
-                  } catch (err) {
-                    console.error('Error selecting episode:', err);
-                    setShowToast({ message: 'Failed to select episode.', isError: true });
-                    setTimeout(() => setShowToast(null), 3000);
-                  }
-                }}
-                className="bg-background border border-white/20 text-white rounded px-3 py-2"
-              >
-                {episodes
-                  .filter((ep: Episode) => ep.season_number === selectedSeasonNumber)
-                  .map((ep: Episode) => (
-                    <option key={ep.episode_number} value={ep.episode_number}>
-                      Episode {ep.episode_number}
-                    </option>
+              />
+            </div>
+            <div className="flex-1">
+              {/* Title */}
+              <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 text-balance">
+                {tvShow.name}
+              </h1>
+              {/* Tagline */}
+              {tvShow.tagline && (
+                <p className="text-white/70 mb-4 italic text-lg">{tvShow.tagline}</p>
+              )}
+              {/* Metadata */}
+              <div className="flex flex-wrap items-center gap-4 mb-6">
+                {tvShow.first_air_date && (
+                  <div className="flex items-center text-white/80">
+                    <span>{new Date(tvShow.first_air_date).toLocaleDateString('en-US', { year: 'numeric' })}</span>
+                  </div>
+                )}
+                {tvShow.vote_average > 0 && (
+                  <div className="flex items-center text-amber-400">
+                    <span>{tvShow.vote_average.toFixed(1)}</span>
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {tvShow.genres.map((genre) => (
+                    <span
+                      key={genre.id}
+                      className="px-2 py-1 rounded bg-white/10 text-white/80 text-xs"
+                    >
+                      {genre.name}
+                    </span>
                   ))}
-              </select>
-              <div className="flex gap-2">
+                </div>
+              </div>
+              {/* Overview */}
+              <p className="text-white/80 mb-6">{tvShow.overview}</p>
+              {/* Action Buttons */}
+              <div className="flex flex-wrap gap-3">
                 <Button
-                  onClick={handlePlayEpisodeInOverlay}
+                  onClick={handlePlayLastWatched}
                   className="bg-accent hover:bg-accent/80 text-white flex items-center"
                 >
                   <Play className="h-4 w-4 mr-2" />
-                  Play Episode
+                  Play {lastWatchedEpisode ? `S${lastWatchedEpisode.season_number} E${lastWatchedEpisode.episode_number}` : 'First Episode'}
                 </Button>
                 <Button
-                  onClick={handleOpenDownload}
+                  onClick={onWatchLatestEpisode}
+                  className="bg-accent hover:bg-accent/80 text-white flex items-center"
+                >
+                  <Play className="h-4 w-4 mr-2" />
+                  Play Latest Episode
+                </Button>
+                <Button
+                  onClick={onDownloadLatestEpisode}
                   className="bg-accent hover:bg-accent/80 text-white flex items-center"
                 >
                   <Download className="h-4 w-4 mr-2" />
-                  Download
+                  Download Latest
+                </Button>
+                <Button
+                  onClick={onShare}
+                  className="bg-accent hover:bg-accent/80 text-white flex items-center"
+                >
+                  <Share2 className="h-4 w-4 mr-2" />
+                  Share
+                </Button>
+                <Button
+                  onClick={onToggleFavorite}
+                  variant="outline"
+                  className={`border-white/20 ${isFavorite ? 'bg-accent text-white' : 'bg-black/50 text-white hover:bg-black/70'}`}
+                >
+                  <Heart className={`h-4 w-4 mr-2 ${isFavorite ? 'fill-current' : ''}`} />
+                  {isFavorite ? 'In Favorites' : 'Add to Favorites'}
+                </Button>
+                <Button
+                  onClick={onToggleWatchlist}
+                  variant="outline"
+                  className={`border-white/20 ${isInWatchlist ? 'bg-accent text-white' : 'bg-black/50 text-white hover:bg-black/70'}`}
+                >
+                  <Bookmark className={`h-4 w-4 mr-2 ${isInWatchlist ? 'fill-current' : ''}`} />
+                  {isInWatchlist ? 'In Watchlist' : 'Add to Watchlist'}
                 </Button>
               </div>
             </div>
-
-            {/* Download Iframe */}
-            <iframe
-              className="w-full h-[60vh] rounded-lg border-2 border-white/10"
-              src={`https://dl.vidsrc.vip/tv/${tvShow.id}/${selectedSeasonNumber}/${selectedEpisodeNumber}`}
-              allowFullScreen
-              title={`Download TV Show - Season ${selectedSeasonNumber}, Episode ${selectedEpisodeNumber}`}
-              onLoad={() =>
-                console.log(
-                  `Download iframe loaded for TV show ID: ${tvShow.id}, Season: ${selectedSeasonNumber}, Episode: ${selectedEpisodeNumber}`
-                )
-              }
-              onError={() => {
-                console.error('Failed to load download iframe');
-                setShowToast({ message: 'Failed to load download content.', isError: true });
-                setTimeout(() => setShowToast(null), 3000);
-              }}
-            />
           </div>
         </div>
-      )}
+      </div>
+    );
+  };
 
-      {/* Main Content */}
-      <div className="max-w-6xl mx-auto px-4 py-8">
-        {/* Tabs Navigation */}
-        <div className="flex border-b border-white/10 mb-6 overflow-x-auto pb-1 hide-scrollbar">
-          <button
-            className={`py-2 px-4 font-medium whitespace-nowrap ${
-              activeTab === 'episodes'
-                ? 'text-white border-b-2 border-accent'
-                : 'text-white/60 hover:text-white'
-            }`}
-            onClick={() => {
-              triggerHaptic();
-              setActiveTab('episodes');
-              console.log('Switched to Episodes tab');
-            }}
-          >
-            Episodes
-          </button>
-          <button
-            className={`py-2 px-4 font-medium whitespace-nowrap ${
-              activeTab === 'about'
-                ? 'text-white border-b-2 border-accent'
-                : 'text-white/60 hover:text-white'
-            }`}
-            onClick={() => {
-              triggerHaptic();
-              setActiveTab('about');
-              console.log('Switched to About tab');
-            }}
-          >
-            About
-          </button>
-          <button
-            className={`py-2 px-4 font-medium whitespace-nowrap ${
-              activeTab === 'cast'
-                ? 'text-white border-b-2 border-accent'
-                : 'text-white/60 hover:text-white'
-            }`}
-            onClick={() => {
-              triggerHaptic();
-              setActiveTab('cast');
-              console.log('Switched to Cast tab');
-            }}
-          >
-            Cast
-          </button>
-          <button
-            className={`py-2 px-4 font-medium whitespace-nowrap ${
-              activeTab === 'reviews'
-                ? 'text-white border-b-2 border-accent'
-                : 'text-white/60 hover:text-white'
-            }`}
-            onClick={() => {
-              triggerHaptic();
-              setActiveTab('reviews');
-              console.log('Switched to Reviews tab');
-            }}
-          >
-            Reviews
-          </button>
-          <button
-            className={`py-2 px-4 font-medium whitespace-nowrap ${
-              activeTab === 'downloads'
-                ? 'text-white border-b-2 border-accent'
-                : 'text-white/60 hover:text-white'
-            }`}
-            onClick={() => {
-              triggerHaptic();
-              setActiveTab('downloads');
-              console.log('Switched to Downloads tab');
-            }}
-            style={{ display: user ? undefined : 'none' }}
-          >
-            Downloads
-          </button>
+  // Episodes Component (Inline)
+  const TVShowEpisodes = ({
+    seasons,
+    episodes,
+    selectedSeason,
+    onSeasonChange,
+    onPlayEpisode,
+    onDownloadEpisode,
+  }: EpisodeProps) => {
+    const toggleEpisode = useCallback((episodeNumber: number) => {
+      try {
+        triggerHaptic();
+        setExpandedEpisodes((prev) =>
+          prev.includes(episodeNumber)
+            ? prev.filter((num) => num !== episodeNumber)
+            : [...prev, episodeNumber]
+        );
+        console.log(`Toggled episode ${episodeNumber} description`);
+      } catch (err) {
+        console.error('Error toggling episode description:', err);
+        addToast('Failed to toggle episode description.', true);
+      }
+    }, [addToast, triggerHaptic]);
+
+    if (!episodes || episodes.length === 0) {
+      console.warn('No episodes available for rendering');
+      return (
+        <div className="text-white text-center">
+          No episodes available for this season.
         </div>
+      );
+    }
 
-        {/* Tab Content */}
-        {activeTab === 'episodes' && (
+    return (
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold text-white mb-6">Seasons & Episodes</h2>
+        {/* Season Selector */}
+        <div className="mb-4">
+          <select
+            value={selectedSeason}
+            onChange={(e) => {
+              try {
+                const seasonNum = parseInt(e.target.value, 10);
+                onSeasonChange(seasonNum);
+                console.log(`Selected season: ${seasonNum}`);
+              } catch (err) {
+                console.error('Error selecting season:', err);
+                addToast('Failed to select season.', true);
+              }
+            }}
+            className="bg-background border border-white/20 text-white rounded px-3 py-2"
+          >
+            {seasons.map((season: Season) => (
+              <option key={season.season_number} value={season.season_number}>
+                Season {season.season_number}
+              </option>
+            ))}
+          </select>
+        </div>
+        {/* Episode List */}
+        <div className="space-y-4">
+          {episodes
+            .filter((ep: Episode) => ep.season_number === selectedSeason)
+            .map((episode: Episode) => (
+              <div
+                key={episode.episode_number}
+                className="bg-background border border-white/10 rounded-lg p-4"
+              >
+                <div className="flex items-center gap-4">
+                  {/* Episode Thumbnail */}
+                  {episode.still_path ? (
+                    <img
+                      src={getImageUrl(episode.still_path, 'w300')}
+                      alt={`Episode ${episode.episode_number}`}
+                      className="w-32 h-18 object-cover rounded"
+                      onError={() => {
+                        console.error(`Failed to load image for Episode ${episode.episode_number}`);
+                        addToast('Failed to load episode image.', true);
+                      }}
+                    />
+                  ) : (
+                    <div className="w-32 h-18 bg-white/10 rounded flex items-center justify-center">
+                      <span className="text-white/70 text-xs">No Image</span>
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    <div className="flex justify-between items-center">
+                      <h3 className="text-white font-medium">
+                        {episode.episode_number}. {episode.name}
+                      </h3>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => toggleEpisode(episode.episode_number)}
+                        className="text-white/70 hover:text-white"
+                      >
+                        {expandedEpisodes.includes(episode.episode_number) ? 'Hide' : 'Show'}
+                      </Button>
+                    </div>
+                    <p className="text-white/70 text-sm">
+                      {episode.air_date && new Date(episode.air_date).toLocaleDateString()}
+                    </p>
+                    <div className="flex gap-2 mt-2">
+                      <Button
+                        onClick={() => {
+                          try {
+                            onPlayEpisode(episode.season_number, episode.episode_number);
+                            triggerHaptic();
+                            console.log(
+                              `Playing episode S${episode.season_number}E${episode.episode_number}`
+                            );
+                          } catch (err) {
+                            console.error('Error playing episode:', err);
+                            addToast('Failed to play episode.', true);
+                          }
+                        }}
+                        className="bg-accent hover:bg-accent/80 text-white flex items-center"
+                      >
+                        <Play className="h-4 w-4 mr-2" />
+                        Play Episode
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          try {
+                            onDownloadEpisode(episode.season_number, episode.episode_number);
+                            triggerHaptic();
+                            console.log(
+                              `Downloading episode S${episode.season_number}E${episode.episode_number}`
+                            );
+                          } catch (err) {
+                            console.error('Error initiating download:', err);
+                            addToast('Failed to initiate download.', true);
+                          }
+                        }}
+                        className="bg-accent hover:bg-accent/80 text-white flex items-center"
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Download
+                      </Button>
+                    </div>
+                    {expandedEpisodes.includes(episode.episode_number) && (
+                      <p className="text-white/80 mt-2">
+                        {episode.overview || 'No description available.'}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Helper Function: Render loading state
+  const renderLoadingState = () => (
+    <div className="flex items-center justify-center min-h-screen bg-background">
+      <div className="animate-pulse-slow text-white font-medium">Loading TV show details...</div>
+    </div>
+  );
+
+  // Helper Function: Render error state
+  const renderErrorState = () => (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-background">
+      <h1 className="text-2xl text-white mb-4">Error: {error}</h1>
+      <Button
+        onClick={() => {
+          navigate('/');
+          console.log('Navigated to home due to error');
+        }}
+        variant="outline"
+      >
+        Return to Home
+      </Button>
+    </div>
+  );
+
+  // Helper Function: Render not found state
+  const renderNotFoundState = () => (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-background">
+      <h1 className="text-2xl text-white mb-4">TV Show not found</h1>
+      <Button
+        onClick={() => {
+          navigate('/');
+          console.log('Navigated to home: TV show not found');
+        }}
+        variant="outline"
+      >
+        Return to Home
+      </Button>
+    </div>
+  );
+
+  // Helper Function: Render toast notifications
+  const renderToasts = () => (
+    <div className="fixed top-5 left-1/2 transform -translate-x-1/2 z-[1000] space-y-2">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={`px-6 py-3 rounded-lg text-white text-sm font-medium shadow-lg transition-opacity duration-300 ${
+            toast.isError ? 'bg-red-600 border-red-400' : 'bg-background border-white/20'
+          } animate-fade-in`}
+        >
+          {toast.message}
+        </div>
+      ))}
+    </div>
+  );
+
+  // Helper Function: Render back button
+  const renderBackButton = () => (
+    <button
+      onClick={() => {
+        navigate(-1);
+        triggerHaptic();
+        console.log('Navigated back from TVShowDetailsPage');
+      }}
+      className="absolute top-20 left-6 z-10 text-white p-2 rounded-full bg-black/30 hover:bg-black/50 transition-colors"
+      aria-label="Go back"
+    >
+      <ArrowLeft className="h-5 w-5" />
+    </button>
+  );
+
+  // Helper Function: Render trailer background
+  const renderTrailerBackground = () => {
+    if (isMobile || !trailerKey) return null;
+    return (
+      <div className="absolute inset-0 bg-black/60">
+        <iframe
+          className="w-full h-full"
+          src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1&mute=1&controls=0&modestbranding=1&loop=1&playlist=${trailerKey}`}
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+          title="TV Show Trailer"
+          onLoad={() => console.log('Trailer iframe loaded')}
+          onError={() => {
+            console.error('Failed to load trailer iframe');
+            addToast('Failed to load trailer.', true);
+          }}
+        />
+      </div>
+    );
+  };
+
+  // Helper Function: Render download overlay
+  const renderDownloadOverlay = () => {
+    if (!showDownloadOverlay || !tvShow || !selectedSeasonNumber || !selectedEpisodeNumber) {
+      console.warn('Download overlay not rendered: Invalid state');
+      return null;
+    }
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+        <div className="relative bg-background rounded-lg shadow-xl w-full max-w-4xl p-6">
+          {/* Close Button */}
+          <button
+            onClick={handleCloseDownload}
+            className="absolute top-4 right-4 text-white p-2 rounded-full bg-black/50 hover:bg-black/70 transition-colors"
+            aria-label="Close download overlay"
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+
+          {/* Security Message */}
+          <p className="text-white text-center mb-4">
+            Please solve this due to security requirements
+          </p>
+
+          {/* Season and Episode Selectors */}
+          <div className="flex flex-wrap gap-4 mb-4">
+            <select
+              value={selectedSeasonNumber}
+              onChange={(e) => {
+                try {
+                  const seasonNum = parseInt(e.target.value, 10);
+                  setSelectedSeasonNumber(seasonNum);
+                  const seasonEpisodes = episodes.filter((ep: Episode) => ep.season_number === seasonNum);
+                  const firstEpisode = seasonEpisodes[0]?.episode_number || 1;
+                  setSelectedEpisodeNumber(firstEpisode);
+                  console.log(`Selected Season: ${seasonNum}, Episode: ${firstEpisode}`);
+                } catch (err) {
+                  console.error('Error selecting season:', err);
+                  addToast('Failed to select season.', true);
+                }
+              }}
+              className="bg-background border border-white/20 text-white rounded px-3 py-2"
+            >
+              {tvShow.seasons.map((season: Season) => (
+                <option key={season.season_number} value={season.season_number}>
+                  Season {season.season_number}
+                </option>
+              ))}
+            </select>
+            <select
+              value={selectedEpisodeNumber}
+              onChange={(e) => {
+                try {
+                  const epNum = parseInt(e.target.value, 10);
+                  setSelectedEpisodeNumber(epNum);
+                  console.log(`Selected Episode: ${epNum}`);
+                } catch (err) {
+                  console.error('Error selecting episode:', err);
+                  addToast('Failed to select episode.', true);
+                }
+              }}
+              className="bg-background border border-white/20 text-white rounded px-3 py-2"
+            >
+              {episodes
+                .filter((ep: Episode) => ep.season_number === selectedSeasonNumber)
+                .map((ep: Episode) => (
+                  <option key={ep.episode_number} value={ep.episode_number}>
+                    Episode {ep.episode_number}
+                  </option>
+                ))}
+            </select>
+            <div className="flex gap-2">
+              <Button
+                onClick={handlePlayEpisodeInOverlay}
+                className="bg-accent hover:bg-accent/80 text-white flex items-center"
+              >
+                <Play className="h-4 w-4 mr-2" />
+                Play Episode
+              </Button>
+              <Button
+                onClick={handleOpenDownload}
+                className="bg-accent hover:bg-accent/80 text-white flex items-center"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download
+              </Button>
+            </div>
+          </div>
+
+          {/* Download Iframe */}
+          <iframe
+            className="w-full h-[60vh] rounded-lg border-2 border-white/10"
+            src={`https://dl.vidsrc.vip/tv/${tvShow.id}/${selectedSeasonNumber}/${selectedEpisodeNumber}`}
+            allowFullScreen
+            title={`Download TV Show - Season ${selectedSeasonNumber}, Episode ${selectedEpisodeNumber}`}
+            onLoad={() =>
+              console.log(
+                `Download iframe loaded for TV show ID: ${tvShow.id}, Season: ${selectedSeasonNumber}, Episode: ${selectedEpisodeNumber}`
+              )
+            }
+            onError={() => {
+              console.error('Failed to load download iframe');
+              addToast('Failed to load download content.', true);
+            }}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  // Helper Function: Render tabs navigation
+  const renderTabsNavigation = () => (
+    <div className="flex border-b border-white/10 mb-6 overflow-x-auto pb-1 hide-scrollbar">
+      {[
+        { id: 'episodes', label: 'Episodes' },
+        { id: 'about', label: 'About' },
+        { id: 'cast', label: 'Cast' },
+        { id: 'reviews', label: 'Reviews' },
+        { id: 'downloads', label: 'Downloads' },
+      ].map((tab) => (
+        <button
+          key={tab.id}
+          className={`py-2 px-4 font-medium whitespace-nowrap ${
+            activeTab === tab.id
+              ? 'text-white border-b-2 border-accent'
+              : 'text-white/60 hover:text-white'
+          }`}
+          onClick={() => {
+            triggerHaptic();
+            setActiveTab(tab.id as TabType);
+            console.log(`Switched to ${tab.label} tab`);
+          }}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  // Helper Function: Render tab content
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'episodes':
+        return (
           <TVShowEpisodes
             seasons={tvShow.seasons}
             episodes={episodes}
@@ -606,20 +917,20 @@ const TVDetailsPage = () => {
               );
             }}
           />
-        )}
-
-        {activeTab === 'about' && <TVShowAbout tvShow={tvShow} />}
-
-        {activeTab === 'cast' && <TVShowCast cast={cast} />}
-
-        {activeTab === 'reviews' && (
+        );
+      case 'about':
+        return <TVShowAbout tvShow={tvShow} />;
+      case 'cast':
+        return <TVShowCast cast={cast} />;
+      case 'reviews':
+        return (
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-white mb-6">User Reviews</h2>
             <ReviewSection mediaId={parseInt(id!, 10)} mediaType="tv" />
           </div>
-        )}
-
-        {activeTab === 'downloads' && (
+        );
+      case 'downloads':
+        return (
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-white mb-6">Download Episodes</h2>
             <TVDownloadSection
@@ -633,16 +944,72 @@ const TVDetailsPage = () => {
               )}
             />
           </div>
-        )}
+        );
+      default:
+        return null;
+    }
+  };
+
+  // Main Render
+  if (isLoading) return renderLoadingState();
+  if (error) return renderErrorState();
+  if (!tvShow) return renderNotFoundState();
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Navbar */}
+      <Navbar />
+
+      {/* Toast Notifications */}
+      {renderToasts()}
+
+      {/* Header Section */}
+      <div className="relative">
+        {renderBackButton()}
+        {renderTrailerBackground()}
+        <TVShowHeader
+          tvShow={tvShow}
+          isFavorite={isFavorite}
+          isInWatchlist={isInMyWatchlist}
+          onToggleFavorite={handleToggleFavorite}
+          onToggleWatchlist={handleToggleWatchlist}
+          onPlayEpisode={handlePlayEpisode}
+          lastWatchedEpisode={getLastWatchedEpisode()}
+          onShare={handleShare}
+          onDownload={handleOpenDownload}
+          onWatchLatestEpisode={handleWatchLatestEpisode}
+          onDownloadLatestEpisode={handleDownloadLatestEpisode}
+        />
+      </div>
+
+      {/* Download Overlay */}
+      {renderDownloadOverlay()}
+
+      {/* Main Content */}
+      <div className="max-w-6xl mx-auto px-4 py-8">
+        {renderTabsNavigation()}
+        {renderTabContent()}
       </div>
 
       {/* Recommendations */}
       {recommendations.length > 0 && (
-        <ContentRow title="More Like This" media={recommendations} />
+        <ContentRow
+          title="More Like This"
+          media={recommendations}
+          onItemClick={(mediaId: number) => {
+            try {
+              navigate(`/tv/${mediaId}`);
+              console.log(`Navigated to TV show ${mediaId}`);
+            } catch (err) {
+              console.error('Error navigating to recommendation:', err);
+              addToast('Failed to load recommendation.', true);
+            }
+          }}
+        />
       )}
 
       {/* Commento Section */}
-      {tvShow && (
+      {tvShow && isCommentoLoaded && (
         <div className="max-w-6xl mx-auto px-4 py-8">
           <h3 className="text-xl font-semibold text-white mb-4">Comments</h3>
           <div id="commento" data-page-id={`tv-${tvShow.id}`}></div>
@@ -652,4 +1019,4 @@ const TVDetailsPage = () => {
   );
 };
 
-export default TVDetailsPage;
+export default TVShowDetailsPage;
