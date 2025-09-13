@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import Navbar from '@/components/Navbar';
 import ContentRow from '@/components/ContentRow';
 import ReviewSection from '@/components/ReviewSection';
-import { Play, Clock, Calendar, Star, ArrowLeft, Shield, Heart, Bookmark, Download } from 'lucide-react';
+import { Play, Clock, Calendar, Star, ArrowLeft, Shield, Heart, Bookmark, Download, Share2 } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useWatchHistory } from '@/hooks/watch-history';
 import { DownloadSection } from '@/components/DownloadSection';
@@ -185,6 +185,34 @@ const MovieDetailsPage = () => {
     setShowDownloadOverlay(false);
     triggerHaptic();
     console.log('Closed download overlay');
+  };
+
+  // Handle Share - Share the movie page URL via Web Share API or copy to clipboard
+  const handleShare = async () => {
+    if (!movie) return;
+
+    const shareUrl = window.location.href; // e.g., https://your-site.netlify.app/movie/123
+    const shareData = {
+      title: movie.title,
+      text: `Check out ${movie.title} on our site!`,
+      url: shareUrl,
+    };
+
+    try {
+      if (navigator.share && isMobile) {
+        await navigator.share(shareData);
+        triggerHaptic();
+        console.log(`Shared movie ${movie.id} via Web Share API: ${shareUrl}`);
+      } else {
+        await navigator.clipboard.writeText(shareUrl);
+        triggerHaptic();
+        alert('Link copied to clipboard!');
+        console.log(`Copied movie ${movie.id} URL to clipboard: ${shareUrl}`);
+      }
+    } catch (error) {
+      console.error('Error sharing movie:', error);
+      alert('Failed to share. Please try again.');
+    }
   };
 
   // Toggle Favorite - Add/remove from favorites
@@ -385,7 +413,7 @@ const MovieDetailsPage = () => {
               {/* Overview */}
               <p className="text-white/80 mb-6">{movie.overview}</p>
               
-              {/* Action Buttons - Play, Download, Favorite, Watchlist */}
+              {/* Action Buttons - Play, Download, Share, Favorite, Watchlist */}
               <div className="flex flex-wrap gap-3">
                 <Button onClick={handlePlayMovie} className="bg-accent hover:bg-accent/80 text-white flex items-center">
                   <Play className="h-4 w-4 mr-2" />
@@ -394,6 +422,10 @@ const MovieDetailsPage = () => {
                 <Button onClick={handleOpenDownload} className="bg-accent hover:bg-accent/80 text-white flex items-center">
                   <Download className="h-4 w-4 mr-2" />
                   Download
+                </Button>
+                <Button onClick={handleShare} className="bg-accent hover:bg-accent/80 text-white flex items-center">
+                  <Share2 className="h-4 w-4 mr-2" />
+                  Share
                 </Button>
                 <Button
                   onClick={handleToggleFavorite}
