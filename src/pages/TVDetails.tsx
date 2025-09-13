@@ -57,7 +57,6 @@ const TVDetailsPage = () => {
         setSelectedSeasonNumber(lastWatched.season_number);
         setSelectedEpisodeNumber(lastWatched.episode_number);
       } else {
-        // Fallback to the latest episode of the latest season
         const latestSeason = tvShow.seasons.reduce((max, season) => 
           season.season_number > max.season_number ? season : max, tvShow.seasons[0]
         );
@@ -70,14 +69,13 @@ const TVDetailsPage = () => {
     }
   }, [tvShow, episodes, getLastWatchedEpisode]);
 
-  // Initialize Commento - Dynamically load Commento script
+  // Initialize Commento
   useEffect(() => {
     if (!tvShow?.id) return;
 
     console.log('Initializing Commento for TV show ID:', tvShow.id);
     const pageId = `tv-${tvShow.id}`;
 
-    // Load Commento script
     const script = document.createElement('script');
     script.src = 'https://cdn.commento.io/js/commento.js';
     script.defer = true;
@@ -112,33 +110,18 @@ const TVDetailsPage = () => {
     };
   }, [tvShow?.id]);
 
-  // Handle Share
-  const handleShare = async () => {
-    if (!tvShow) return;
-
-    const shareUrl = window.location.href;
-    const shareData = {
-      title: tvShow.name,
-      text: `Watch ${tvShow.name} now! ${tvShow.overview.slice(0, 100)}...`,
-      url: shareUrl,
-    };
-
-    try {
-      if (navigator.share) {
-        await navigator.share(shareData);
-        triggerHaptic();
-        console.log(`Shared TV show ${tvShow.id} via Web Share API: ${shareUrl}`);
-      } else {
-        await navigator.clipboard.writeText(shareUrl);
-        triggerHaptic();
-        setShowToast({ message: 'Link copied to clipboard!', isError: false });
-        console.log(`Copied TV show ${tvShow.id} URL to clipboard: ${shareUrl}`);
-        setTimeout(() => setShowToast(null), 3000);
+  // Handle Watch Latest Episode
+  const handleWatchLatestEpisode = () => {
+    if (tvShow && episodes) {
+      const latestSeason = tvShow.seasons.reduce((max, season) => 
+        season.season_number > max.season_number ? season : max, tvShow.seasons[0]
+      );
+      const latestEpisodes = episodes.filter(ep => ep.season_number === latestSeason.season_number);
+      const latestEpisode = latestEpisodes[latestEpisodes.length - 1];
+      if (latestEpisode) {
+        handlePlayEpisode(latestSeason.season_number, latestEpisode.episode_number);
+        console.log(`Playing latest episode - TV show ID: ${tvShow.id}, Season: ${latestSeason.season_number}, Episode: ${latestEpisode.episode_number}`);
       }
-    } catch (error) {
-      console.error('Error sharing TV show:', error);
-      setShowToast({ message: 'Failed to share. Please try again.', isError: true });
-      setTimeout(() => setShowToast(null), 3000);
     }
   };
 
@@ -158,7 +141,7 @@ const TVDetailsPage = () => {
     }
   };
 
-  // Handle Download - Open overlay with current selection
+  // Handle Download
   const handleOpenDownload = () => {
     if (tvShow && selectedSeasonNumber && selectedEpisodeNumber) {
       setShowDownloadOverlay(true);
@@ -260,6 +243,7 @@ const TVDetailsPage = () => {
           lastWatchedEpisode={getLastWatchedEpisode()}
           onShare={handleShare}
           onDownload={handleOpenDownload}
+          onWatchLatestEpisode={handleWatchLatestEpisode} // New prop
           onDownloadLatestEpisode={handleDownloadLatestEpisode} // New prop
         />
       </div>
@@ -268,7 +252,6 @@ const TVDetailsPage = () => {
       {showDownloadOverlay && tvShow && selectedSeasonNumber && selectedEpisodeNumber && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
           <div className="relative bg-background rounded-lg shadow-xl w-full max-w-4xl p-6">
-            {/* Close Button */}
             <button
               onClick={handleCloseDownload}
               className="absolute top-4 right-4 text-white p-2 rounded-full bg-black/50 hover:bg-black/70 transition-colors"
@@ -279,12 +262,10 @@ const TVDetailsPage = () => {
               </svg>
             </button>
 
-            {/* Security Message */}
             <p className="text-white text-center mb-4">
               Please solve this due to security requirements
             </p>
 
-            {/* Season and Episode Selector */}
             <div className="flex flex-wrap gap-4 mb-4">
               <select
                 value={selectedSeasonNumber}
@@ -338,7 +319,6 @@ const TVDetailsPage = () => {
               </div>
             </div>
 
-            {/* Iframe for Download Page */}
             <iframe
               className="w-full h-[60vh] rounded-lg border-2 border-white/10"
               src={`https://dl.vidsrc.vip/tv/${tvShow.id}/${selectedSeasonNumber}/${selectedEpisodeNumber}`}
@@ -427,6 +407,13 @@ const TVDetailsPage = () => {
             selectedSeason={selectedSeason}
             onSeasonChange={setSelectedSeason}
             onPlayEpisode={handlePlayEpisode}
+            onDownloadEpisode={(seasonNumber, episodeNumber) => {
+              setSelectedSeasonNumber(seasonNumber);
+              setSelectedEpisodeNumber(episodeNumber);
+              setShowDownloadOverlay(true);
+              triggerHaptic();
+              console.log(`Opened download overlay for TV show ID: ${tvShow.id}, Season: ${seasonNumber}, Episode: ${episodeNumber}`);
+            }}
           />
         )}
 
