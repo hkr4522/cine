@@ -93,6 +93,7 @@ const MovieDetailsPage = () => {
   const [authorName, setAuthorName] = useState('');
   const [commentsLoading, setCommentsLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
 
   // Fetch Movie Data
   useEffect(() => {
@@ -162,21 +163,30 @@ const MovieDetailsPage = () => {
     }
   }, [movie?.id, isInFavorites, isInWatchlist]);
 
-  // Firebase Comments Logic
+  // Firebase Authentication and Comments
   useEffect(() => {
-    // Sign in anonymously
+    console.log('Checking auth state...');
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (!user) {
         try {
+          console.log('Attempting anonymous sign-in...');
           await signInAnonymously(auth);
+          console.log('Anonymous sign-in successful');
+          setAuthReady(true);
         } catch (error) {
           console.error('Error signing in anonymously:', error);
+          alert('Failed to initialize commenting. Please try again later.');
+          setAuthReady(false);
         }
+      } else {
+        console.log('User authenticated:', user.uid);
+        setAuthReady(true);
       }
     });
 
     // Fetch comments in real-time
-    if (movie?.id) {
+    if (movie?.id && authReady) {
+      console.log(`Fetching comments for movie-${movie.id}`);
       const q = query(collection(db, `comments/movie-${movie.id}/items`), orderBy('timestamp', 'desc'));
       const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
         const loadedComments: Comment[] = [];
@@ -185,8 +195,10 @@ const MovieDetailsPage = () => {
         });
         setComments(loadedComments);
         setCommentsLoading(false);
+        console.log('Comments loaded:', loadedComments.length);
       }, (error) => {
         console.error('Error fetching comments:', error);
+        alert('Failed to load comments. Please try again.');
         setCommentsLoading(false);
       });
 
@@ -195,13 +207,29 @@ const MovieDetailsPage = () => {
         unsubscribeSnapshot();
       };
     }
-  }, [movie?.id]);
+  }, [movie?.id, authReady]);
 
   const sendComment = async () => {
-    if (!newComment.trim() || !movie?.id || !auth.currentUser) return;
+    if (!newComment.trim()) {
+      alert('Please enter a comment.');
+      return;
+    }
+    if (!movie?.id) {
+      alert('Movie ID not available.');
+      return;
+    }
+    if (!auth.currentUser) {
+      alert('Authentication required. Please wait and try again.');
+      return;
+    }
+    if (!authReady) {
+      alert('Authenticating... Please wait.');
+      return;
+    }
 
     setSending(true);
     try {
+      console.log('Sending comment:', { content: newComment, author: authorName || 'Anonymous' });
       await addDoc(collection(db, `comments/movie-${movie.id}/items`), {
         content: newComment,
         author: authorName.trim() || 'Anonymous',
@@ -216,18 +244,29 @@ const MovieDetailsPage = () => {
       });
       setNewComment('');
       setAuthorName('');
+      alert('Comment posted successfully!');
     } catch (error) {
       console.error('Error adding comment:', error);
+      alert('Failed to post comment. Please try again.');
     } finally {
       setSending(false);
     }
   };
 
   const reactToComment = async (commentId: string, reaction: string) => {
-    if (!auth.currentUser || !movie?.id) return;
+    if (!auth.currentUser || !movie?.id) {
+      alert('Authentication required to react.');
+      return;
+    }
 
     const userId = auth.currentUser.uid;
     const commentRef = doc(db, `comments/movie-${movie.id}/items`, commentId);
+    const comment = comments.find((c) => c.id === commentId);
+
+    if (!comment) {
+      alert('Comment not found.');
+      return;
+    }
 
     try {
       // Optimistically update UI
@@ -249,10 +288,14 @@ const MovieDetailsPage = () => {
 
       // Update Firestore
       await updateDoc(commentRef, {
-        [`reactions.${reaction}`]: arrayUnion(userId),
+        [`reactions.${reaction}`]: comment.reactions[reaction].includes(userId)
+          ? arrayRemove(userId)
+          : arrayUnion(userId),
       });
+      console.log(`Reaction ${reaction} toggled for comment ${commentId}`);
     } catch (error) {
       console.error('Error updating reaction:', error);
+      alert('Failed to update reaction.');
     }
   };
 
@@ -626,6 +669,7 @@ const MovieDetailsPage = () => {
                   onChange={(e) => setAuthorName(e.target.value)}
                   className="flex-1 bg-transparent text-white placeholder-white/50 border-b border-white/20 focus:outline-none"
                   maxLength={50}
+                  disabled={!authReady}
                 />
               </div>
               <div className="flex gap-2">
@@ -637,11 +681,13 @@ const MovieDetailsPage = () => {
                   onKeyPress={(e) => e.key === 'Enter' && sendComment()}
                   className="flex-1 bg-transparent text-white placeholder-white/50 border-b border-white/20 focus:outline-none"
                   maxLength={500}
+                  disabled={!authReady}
                 />
-                <Button onClick={sendComment} disabled={sending || !newComment.trim()}>
-                  <Send className="h-4 w-4" />
+                <Button onClick={sendComment} disabled={sending || !newComment.trim() || !authReady}>
+                  {sending ? 'Sending...' : <Send className="h-4 w-4" />}
                 </Button>
               </div>
+              {!authReady && <p className="text-white/50 text-sm mt-2">Initializing authentication...</p>}
             </div>
 
             {/* Comments List */}
@@ -673,6 +719,7 @@ const MovieDetailsPage = () => {
                               onClick={() => reactToComment(comment.id, key)}
                               className="flex items-center gap-1 text-xs text-white/70 hover:text-white transition-colors"
                               title={label}
+                              disabled={!authReady}
                             >
                               <span>{emoji}</span>
                               <span>{comment.reactions[key]?.length || 0}</span>
