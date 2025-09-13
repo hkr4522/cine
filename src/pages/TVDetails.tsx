@@ -57,7 +57,7 @@ const TVDetailsPage = () => {
         setSelectedSeasonNumber(lastWatched.season_number);
         setSelectedEpisodeNumber(lastWatched.episode_number);
       } else {
-        // Fallback to the last episode of the latest season
+        // Fallback to the latest episode of the latest season
         const latestSeason = tvShow.seasons.reduce((max, season) => 
           season.season_number > max.season_number ? season : max, tvShow.seasons[0]
         );
@@ -84,7 +84,6 @@ const TVDetailsPage = () => {
     script.async = true;
     script.onload = () => {
       console.log('Commento script loaded successfully');
-      // Ensure the Commento div has the correct page-id
       const commentoDiv = document.getElementById('commento');
       if (commentoDiv) {
         commentoDiv.setAttribute('data-page-id', pageId);
@@ -101,12 +100,10 @@ const TVDetailsPage = () => {
       setTimeout(() => setShowToast(null), 3000);
     };
 
-    // Append script to document
     const target = document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0];
     target.appendChild(script);
     console.log('Commento script appended to document');
 
-    // Cleanup: Remove script on unmount
     return () => {
       if (script.parentNode) {
         script.parentNode.removeChild(script);
@@ -115,11 +112,11 @@ const TVDetailsPage = () => {
     };
   }, [tvShow?.id]);
 
-  // Handle Share - Share the TV show page URL via Web Share API or copy to clipboard
+  // Handle Share
   const handleShare = async () => {
     if (!tvShow) return;
 
-    const shareUrl = window.location.href; // e.g., https://your-site.netlify.app/tv/123
+    const shareUrl = window.location.href;
     const shareData = {
       title: tvShow.name,
       text: `Watch ${tvShow.name} now! ${tvShow.overview.slice(0, 100)}...`,
@@ -145,7 +142,23 @@ const TVDetailsPage = () => {
     }
   };
 
-  // Handle Download - Open overlay with iframe for selected episode
+  // Handle Download Latest Episode
+  const handleDownloadLatestEpisode = () => {
+    if (tvShow && episodes) {
+      const latestSeason = tvShow.seasons.reduce((max, season) => 
+        season.season_number > max.season_number ? season : max, tvShow.seasons[0]
+      );
+      const latestEpisodes = episodes.filter(ep => ep.season_number === latestSeason.season_number);
+      const latestEpisode = latestEpisodes[latestEpisodes.length - 1];
+      setSelectedSeasonNumber(latestSeason.season_number);
+      setSelectedEpisodeNumber(latestEpisode?.episode_number || 1);
+      setShowDownloadOverlay(true);
+      triggerHaptic();
+      console.log(`Opened download overlay for latest episode - TV show ID: ${tvShow.id}, Season: ${latestSeason.season_number}, Episode: ${latestEpisode?.episode_number || 1}`);
+    }
+  };
+
+  // Handle Download - Open overlay with current selection
   const handleOpenDownload = () => {
     if (tvShow && selectedSeasonNumber && selectedEpisodeNumber) {
       setShowDownloadOverlay(true);
@@ -154,14 +167,14 @@ const TVDetailsPage = () => {
     }
   };
 
-  // Handle Close Overlay - Close the download overlay
+  // Handle Close Overlay
   const handleCloseDownload = () => {
     setShowDownloadOverlay(false);
     triggerHaptic();
     console.log('Closed download overlay');
   };
 
-  // Handle Play Episode in Overlay - Navigate to watch page for selected episode
+  // Handle Play Episode in Overlay
   const handlePlayEpisodeInOverlay = () => {
     if (tvShow && selectedSeasonNumber && selectedEpisodeNumber) {
       handlePlayEpisode(selectedSeasonNumber, selectedEpisodeNumber);
@@ -247,6 +260,7 @@ const TVDetailsPage = () => {
           lastWatchedEpisode={getLastWatchedEpisode()}
           onShare={handleShare}
           onDownload={handleOpenDownload}
+          onDownloadLatestEpisode={handleDownloadLatestEpisode} // New prop
         />
       </div>
 
@@ -277,7 +291,6 @@ const TVDetailsPage = () => {
                 onChange={(e) => {
                   const seasonNum = parseInt(e.target.value, 10);
                   setSelectedSeasonNumber(seasonNum);
-                  // Reset episode to 1 for new season
                   const seasonEpisodes = episodes.filter(ep => ep.season_number === seasonNum);
                   setSelectedEpisodeNumber(seasonEpisodes[0]?.episode_number || 1);
                   console.log(`Selected Season: ${seasonNum}, Episode: ${seasonEpisodes[0]?.episode_number || 1}`);
