@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import ContentRow from '@/components/ContentRow';
 import Navbar from '@/components/Navbar';
 import ReviewSection from '@/components/ReviewSection';
-import CommentsSection from '@/components/CommentsSection'; // New custom comments component
 import TVShowHeader from '@/components/tv/TVShowHeader';
 import TVShowEpisodes from '@/components/tv/TVShowEpisodes';
 import TVShowAbout from '@/components/tv/TVShowAbout';
@@ -70,6 +69,51 @@ const TVDetailsPage = () => {
       console.log(`Initialized download overlay - Season: ${selectedSeasonNumber}, Episode: ${selectedEpisodeNumber}`);
     }
   }, [tvShow, episodes, getLastWatchedEpisode]);
+
+  // Initialize Commento - Dynamically load Commento script
+  useEffect(() => {
+    if (!tvShow?.id) return;
+
+    console.log('Initializing Commento for TV show ID:', tvShow.id);
+    const pageId = `tv-${tvShow.id}`;
+
+    // Load Commento script
+    const script = document.createElement('script');
+    script.src = 'https://cdn.commento.io/js/commento.js';
+    script.defer = true;
+    script.async = true;
+    script.onload = () => {
+      console.log('Commento script loaded successfully');
+      // Ensure the Commento div has the correct page-id
+      const commentoDiv = document.getElementById('commento');
+      if (commentoDiv) {
+        commentoDiv.setAttribute('data-page-id', pageId);
+        console.log(`Commento initialized with data-page-id: ${pageId}`);
+      } else {
+        console.error('Commento div not found');
+        setShowToast({ message: 'Failed to initialize comments. Please refresh the page.', isError: true });
+        setTimeout(() => setShowToast(null), 3000);
+      }
+    };
+    script.onerror = () => {
+      console.error('Failed to load Commento script');
+      setShowToast({ message: 'Failed to load comments system. Check your network and try again.', isError: true });
+      setTimeout(() => setShowToast(null), 3000);
+    };
+
+    // Append script to document
+    const target = document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0];
+    target.appendChild(script);
+    console.log('Commento script appended to document');
+
+    // Cleanup: Remove script on unmount
+    return () => {
+      if (script.parentNode) {
+        script.parentNode.removeChild(script);
+        console.log('Commento script removed');
+      }
+    };
+  }, [tvShow?.id]);
 
   // Handle Share - Share the TV show page URL via Web Share API or copy to clipboard
   const handleShare = async () => {
@@ -405,11 +449,11 @@ const TVDetailsPage = () => {
         <ContentRow title="More Like This" media={recommendations} />
       )}
 
-      {/* Custom Comments Section */}
+      {/* Commento Section */}
       {tvShow && (
         <div className="max-w-6xl mx-auto px-4 py-8">
           <h3 className="text-xl font-semibold text-white mb-4">Comments</h3>
-          <CommentsSection mediaId={parseInt(id!, 10)} mediaType="tv" />
+          <div id="commento" data-page-id={`tv-${tvShow.id}`}></div>
         </div>
       )}
     </div>
