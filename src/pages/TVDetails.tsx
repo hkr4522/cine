@@ -6,9 +6,6 @@ import { Button } from '@/components/ui/button';
 import ContentRow from '@/components/ContentRow';
 import Navbar from '@/components/Navbar';
 import ReviewSection from '@/components/ReviewSection';
-import TVShowAbout from '@/components/tv/TVShowAbout';
-import TVShowCast from '@/components/tv/TVShowCast';
-import TVDownloadSection from '@/components/tv/TVDownloadSection';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useTVDetails } from '@/hooks/use-tv-details';
 import { useAuth } from '@/hooks';
@@ -43,6 +40,17 @@ interface EpisodeProps {
   onSeasonChange: (seasonNumber: number) => void;
   onPlayEpisode: (seasonNumber: number, episodeNumber: number) => void;
   onDownloadEpisode: (seasonNumber: number, episodeNumber: number) => void;
+}
+interface AboutProps {
+  tvShow: TVShow;
+}
+interface CastProps {
+  cast: any[];
+}
+interface DownloadSectionProps {
+  tvShowName: string;
+  seasons: Season[];
+  episodesBySeason: { [key: number]: Episode[] };
 }
 
 // Helper Function: Generate unique ID for toasts
@@ -664,6 +672,146 @@ const TVShowDetailsPage = () => {
     );
   };
 
+  // About Component (Inline)
+  const TVShowAbout = ({ tvShow }: AboutProps) => {
+    return (
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold text-white mb-6">About {tvShow.name}</h2>
+        <p className="text-white/80 mb-4">{tvShow.overview}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <h3 className="text-lg font-semibold text-white mb-2">Details</h3>
+            <p className="text-white/80">
+              <strong>First Air Date:</strong>{' '}
+              {tvShow.first_air_date
+                ? new Date(tvShow.first_air_date).toLocaleDateString()
+                : 'N/A'}
+            </p>
+            <p className="text-white/80">
+              <strong>Status:</strong> {tvShow.status || 'N/A'}
+            </p>
+            <p className="text-white/80">
+              <strong>Number of Seasons:</strong> {tvShow.number_of_seasons || 'N/A'}
+            </p>
+            <p className="text-white/80">
+              <strong>Number of Episodes:</strong> {tvShow.number_of_episodes || 'N/A'}
+            </p>
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-white mb-2">Genres</h3>
+            <div className="flex flex-wrap gap-2">
+              {tvShow.genres.map((genre) => (
+                <span
+                  key={genre.id}
+                  className="px-2 py-1 rounded bg-white/10 text-white/80 text-xs"
+                >
+                  {genre.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Cast Component (Inline)
+  const TVShowCast = ({ cast }: CastProps) => {
+    return (
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold text-white mb-6">Cast</h2>
+        {cast.length === 0 ? (
+          <p className="text-white/80">No cast information available.</p>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {cast.map((actor) => (
+              <div key={actor.id} className="text-white/80">
+                <p className="font-medium">{actor.name}</p>
+                <p className="text-sm">as {actor.character || 'N/A'}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Download Section Component (Inline)
+  const TVDownloadSection = ({ tvShowName, seasons, episodesBySeason }: DownloadSectionProps) => {
+    const [selectedDownloadSeason, setSelectedDownloadSeason] = useState<number>(seasons[0]?.season_number || 1);
+
+    return (
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold text-white mb-6">Download Episodes for {tvShowName}</h2>
+        {/* Season Selector */}
+        <div className="mb-4">
+          <select
+            value={selectedDownloadSeason}
+            onChange={(e) => {
+              try {
+                const seasonNum = parseInt(e.target.value, 10);
+                setSelectedDownloadSeason(seasonNum);
+                console.log(`Selected download season: ${seasonNum}`);
+              } catch (err) {
+                console.error('Error selecting download season:', err);
+                addToast('Failed to select season.', true);
+              }
+            }}
+            className="bg-background border border-white/20 text-white rounded px-3 py-2"
+          >
+            {seasons.map((season: Season) => (
+              <option key={season.season_number} value={season.season_number}>
+                Season {season.season_number}
+              </option>
+            ))}
+          </select>
+        </div>
+        {/* Episode List for Download */}
+        <div className="space-y-4">
+          {(episodesBySeason[selectedDownloadSeason] || []).length === 0 ? (
+            <p className="text-white/80">No episodes available for this season.</p>
+          ) : (
+            episodesBySeason[selectedDownloadSeason].map((episode: Episode) => (
+              <div
+                key={episode.episode_number}
+                className="bg-background border border-white/10 rounded-lg p-4 flex justify-between items-center"
+              >
+                <div>
+                  <p className="text-white font-medium">
+                    Episode {episode.episode_number}: {episode.name}
+                  </p>
+                  <p className="text-white/70 text-sm">
+                    {episode.air_date ? new Date(episode.air_date).toLocaleDateString() : 'N/A'}
+                  </p>
+                </div>
+                <Button
+                  onClick={() => {
+                    try {
+                      setSelectedSeasonNumber(episode.season_number);
+                      setSelectedEpisodeNumber(episode.episode_number);
+                      setShowDownloadOverlay(true);
+                      triggerHaptic();
+                      console.log(
+                        `Opened download overlay for S${episode.season_number}E${episode.episode_number}`
+                      );
+                    } catch (err) {
+                      console.error('Error initiating download:', err);
+                      addToast('Failed to initiate download.', true);
+                    }
+                  }}
+                  className="bg-accent hover:bg-accent/80 text-white flex items-center"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // Helper Function: Render loading state
   const renderLoadingState = () => (
     <div className="flex items-center justify-center min-h-screen bg-background">
@@ -932,7 +1080,6 @@ const TVShowDetailsPage = () => {
       case 'downloads':
         return (
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-white mb-6">Download Episodes</h2>
             <TVDownloadSection
               tvShowName={tvShow.name}
               seasons={tvShow.seasons}
