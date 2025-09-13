@@ -249,9 +249,7 @@ const MovieDetailsPage = () => {
 
       // Update Firestore
       await updateDoc(commentRef, {
-        [`reactions.${reaction}`]: c.reactions[reaction].includes(userId)
-          ? arrayRemove(userId)
-          : arrayUnion(userId),
+        [`reactions.${reaction}`]: arrayUnion(userId),
       });
     } catch (error) {
       console.error('Error updating reaction:', error);
@@ -411,7 +409,7 @@ const MovieDetailsPage = () => {
                 {movie.certification && (
                   <div className="flex items-center bg-white/20 px-2 py-1 rounded">
                     <Shield className="h-4 w-4 mr-1 text-white" />
-                    <span className="text-white font-medium text-sm">{movie.certification}</ quitspan>
+                    <span className="text-white font-medium text-sm">{movie.certification}</span>
                   </div>
                 )}
                 {movie.release_date && (
