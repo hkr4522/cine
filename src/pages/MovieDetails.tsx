@@ -418,7 +418,7 @@ const MovieDetailsPage = () => {
             Cast
           </button>
           <button
-            className=`py-2 px-4 font-medium whitespace-nowrap ${activeTab === 'reviews' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'}`
+            className={`py-2 px-4 font-medium whitespace-nowrap ${activeTab === 'reviews' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'}`}
             onClick={() => {
               triggerHaptic();
               setActiveTab('reviews');
