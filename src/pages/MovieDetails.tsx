@@ -441,7 +441,6 @@ const MovieDetailsPage = () => {
             <iframe
               className="w-full h-[60vh] rounded-lg border-2 border-white/10"
               src={`https://dl.vidsrc.vip/movie/${movie.id}`}
-              sandbox="allow-same-origin allow-scripts allow-forms"
               allowFullScreen
               title="Download Movie"
               onLoad={() => console.log(`Download iframe loaded for movie ID: ${movie.id}`)}
