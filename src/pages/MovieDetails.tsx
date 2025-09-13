@@ -7,73 +7,17 @@ import { Button } from '@/components/ui/button';
 import Navbar from '@/components/Navbar';
 import ContentRow from '@/components/ContentRow';
 import ReviewSection from '@/components/ReviewSection';
-import { Play, Clock, Calendar, Star, ArrowLeft, Shield, Heart, Bookmark, Send, User, MessageCircle, Reply, ThumbsUp, Heart as HeartIcon, Laugh, Zap, Frown } from 'lucide-react';
+import { Play, Clock, Calendar, Star, ArrowLeft, Shield, Heart, Bookmark } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useWatchHistory } from '@/hooks/watch-history';
 import { DownloadSection } from '@/components/DownloadSection';
 import { useAuth } from '@/hooks';
 import { useHaptic } from '@/hooks/useHaptic';
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAnalytics } from 'firebase/analytics';
-import { getDatabase, ref, push, onValue, update, remove } from 'firebase/database';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
-// Firebase Configuration - Ensure this matches your Firebase Console settings
-const firebaseConfig = {
-  apiKey: "AIzaSyDs4m55HdwEbh2nhr8lzauK-1vj3otkQmA",
-  authDomain: "cinecomments.firebaseapp.com",
-  projectId: "cinecomments",
-  storageBucket: "cinecomments.firebasestorage.app",
-  messagingSenderId: "737334252175",
-  appId: "1:737334252175:web:39c899d69a89e40ea1d6fa",
-  measurementId: "G-316F01H04G",
-  databaseURL: "https://cinecomments-default-rtdb.firebaseio.com/" // Realtime Database URL
-};
-
-// Initialize Firebase - Singleton pattern to avoid duplicate app errors
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const analytics = getAnalytics(app);
-const db = getDatabase(app);
-const auth = getAuth(app);
-
-// Comment Interface - Structure for comments and replies
-interface Comment {
-  id: string;
-  content: string;
-  author: string;
-  authorId: string;
-  timestamp: number;
-  gifUrl?: string;
-  reactions: { [key: string]: { [userId: string]: boolean } };
-  replies: Comment[];
-}
-
-// Emoji Reactions - 5 emojis for reactions
-const emojiReactions = [
-  { key: 'like', emoji: <ThumbsUp size={16} />, label: 'Like' },
-  { key: 'love', emoji: <HeartIcon size={16} />, label: 'Love' },
-  { key: 'laugh', emoji: <Laugh size={16} />, label: 'Laugh' },
-  { key: 'wow', emoji: <Zap size={16} />, label: 'Wow' },
-  { key: 'sad', emoji: <Frown size={16} />, label: 'Sad' },
-];
-
-// GIF Validation - Basic check for valid GIF URLs
-const handleGifInput = (gifUrl: string) => {
-  if (gifUrl && (gifUrl.includes('giphy.com') || gifUrl.includes('tenor.com') || gifUrl.includes('.gif'))) {
-    return gifUrl;
-  }
-  return null;
-};
-
-// Timestamp Formatter - Convert timestamp to readable format
-const formatTimestamp = (timestamp: number) => {
-  if (!timestamp) return 'Just now';
-  const date = new Date(timestamp);
-  return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-};
-
+// Type Definitions for Tabs
 type TabType = 'about' | 'cast' | 'reviews' | 'downloads';
 
+// Main Movie Details Component
 const MovieDetailsPage = () => {
   // Routing and Navigation
   const { id } = useParams<{ id: string }>();
@@ -100,19 +44,7 @@ const MovieDetailsPage = () => {
   const { triggerHaptic } = useHaptic();
   const { user } = useAuth();
 
-  // Comment System States
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [newComment, setNewComment] = useState('');
-  const [newReply, setNewReply] = useState<{ [key: string]: string }>({});
-  const [newGifUrl, setNewGifUrl] = useState('');
-  const [authorName, setAuthorName] = useState('');
-  const [commentsLoading, setCommentsLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const [replyingTo, setReplyingTo] = useState<string | null>(null);
-  const [authReady, setAuthReady] = useState(false);
-  const [showGifInput, setShowGifInput] = useState(false);
-
-  // Fetch Movie Data
+  // Fetch Movie Data - Load movie details, recommendations, and cast
   useEffect(() => {
     const fetchMovieData = async () => {
       if (!id) {
@@ -131,6 +63,7 @@ const MovieDetailsPage = () => {
       try {
         setIsLoading(true);
         setError(null);
+        console.log(`Fetching movie data for ID: ${movieId}`);
         const [movieData, recommendationsData, castData] = await Promise.all([
           getMovieDetails(movieId),
           getMovieRecommendations(movieId),
@@ -157,11 +90,12 @@ const MovieDetailsPage = () => {
     fetchMovieData();
   }, [id]);
 
-  // Fetch Trailer
+  // Fetch Trailer - Load YouTube trailer key
   useEffect(() => {
     const fetchTrailer = async () => {
       if (movie?.id) {
         try {
+          console.log(`Fetching trailer for movie ID: ${movie.id}`);
           const trailerData = await getMovieTrailer(movie.id);
           setTrailerKey(trailerData);
           console.log('Trailer loaded:', trailerData);
@@ -174,288 +108,83 @@ const MovieDetailsPage = () => {
     fetchTrailer();
   }, [movie?.id]);
 
-  // Watch History
+  // Update Watch History - Check if movie is in favorites or watchlist
   useEffect(() => {
     if (movie?.id) {
       setIsFavorite(isInFavorites(movie.id, 'movie'));
       setIsInMyWatchlist(isInWatchlist(movie.id, 'movie'));
+      console.log(`Checked watch history - Favorite: ${isInFavorites(movie.id, 'movie')}, Watchlist: ${isInWatchlist(movie.id, 'movie')}`);
     }
   }, [movie?.id, isInFavorites, isInWatchlist]);
 
-  // Firebase Authentication - Simplified with retry
+  // Initialize GraphComment - Dynamically load GraphComment script with unique uid per movie
   useEffect(() => {
-    console.log('Starting Firebase auth setup...');
-    let retryCount = 0;
-    const maxRetries = 3;
+    if (!movie?.id) return;
 
-    const trySignIn = async () => {
-      try {
-        console.log('Attempting anonymous sign-in...');
-        await signInAnonymously(auth);
-        console.log('Anonymous sign-in successful');
-        setAuthReady(true);
-      } catch (error) {
-        console.error('Error signing in anonymously:', error);
-        if (retryCount < maxRetries) {
-          retryCount++;
-          console.log(`Retrying sign-in (${retryCount}/${maxRetries})...`);
-          setTimeout(trySignIn, 1000 * retryCount); // Retry after delay
-        } else {
-          alert('Failed to initialize commenting after multiple attempts. Please refresh the page.');
-          setAuthReady(false);
-        }
+    console.log('Initializing GraphComment for movie ID:', movie.id);
+    const pageId = `movie-${movie.id}`;
+
+    // Define GraphComment parameters
+    const __semio__params = {
+      graphcommentId: "cinepeace",
+      behaviour: {
+        uid: pageId, // Unique identifier for comments thread (movie-specific)
+      },
+    };
+
+    // Define onload function for GraphComment
+    (window as any).__semio__onload = function () {
+      if ((window as any).__semio__gc_graphlogin) {
+        (window as any).__semio__gc_graphlogin(__semio__params);
+        console.log('GraphComment initialized with uid:', pageId);
+      } else {
+        console.error('GraphComment __semio__gc_graphlogin not available');
+        alert('Failed to initialize comments. Please refresh the page.');
       }
     };
 
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        console.log('User authenticated:', user.uid);
-        setAuthReady(true);
-      } else {
-        console.log('No user found, initiating sign-in...');
-        trySignIn();
+    // Load GraphComment script
+    const gc = document.createElement('script');
+    gc.type = 'text/javascript';
+    gc.async = true;
+    gc.defer = true;
+    gc.src = 'https://integration.graphcomment.com/gc_graphlogin.js?' + Date.now();
+    gc.onload = (window as any).__semio__onload;
+    gc.onerror = () => {
+      console.error('Failed to load GraphComment script');
+      alert('Failed to load comments system. Check your network and try again.');
+    };
+
+    // Append script to document
+    const target = document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0];
+    target.appendChild(gc);
+    console.log('GraphComment script appended to document');
+
+    // Cleanup: Remove script on unmount
+    return () => {
+      if (gc.parentNode) {
+        gc.parentNode.removeChild(gc);
+        console.log('GraphComment script removed');
       }
-    });
+    };
+  }, [movie?.id]);
 
-    return () => unsubscribe();
-  }, []);
-
-  // Load Comments - Real-time listener for comments
-  useEffect(() => {
-    if (movie?.id && authReady) {
-      const pageId = `movie-${movie.id}`;
-      console.log(`Loading comments for ${pageId}`);
-      const commentsRef = ref(db, `comments/${pageId}`);
-      const unsubscribe = onValue(commentsRef, (snapshot) => {
-        if (snapshot.exists()) {
-          const data = snapshot.val();
-          const loadedComments: Comment[] = Object.keys(data).map((key) => {
-            const commentData = data[key];
-            const buildReplies = (repliesData: { [key: string]: any }): Comment[] => {
-              return Object.keys(repliesData).map((replyKey) => ({
-                id: replyKey,
-                content: repliesData[replyKey].content,
-                author: repliesData[replyKey].author,
-                authorId: repliesData[replyKey].authorId,
-                timestamp: repliesData[replyKey].timestamp,
-                gifUrl: repliesData[replyKey].gifUrl,
-                reactions: repliesData[replyKey].reactions || {},
-                replies: buildReplies(repliesData[replyKey].replies || {}),
-              }));
-            };
-            return {
-              id: key,
-              content: commentData.content,
-              author: commentData.author,
-              authorId: commentData.authorId,
-              timestamp: commentData.timestamp,
-              gifUrl: commentData.gifUrl,
-              reactions: commentData.reactions || {},
-              replies: buildReplies(commentData.replies || {}),
-            };
-          });
-          setComments(loadedComments);
-          setCommentsLoading(false);
-          console.log(`Loaded ${loadedComments.length} comments`);
-        } else {
-          setComments([]);
-          setCommentsLoading(false);
-          console.log('No comments found');
-        }
-      }, (error) => {
-        console.error('Error loading comments:', error);
-        alert('Failed to load comments. Check your network or Firebase setup.');
-        setCommentsLoading(false);
-      });
-
-      return () => unsubscribe();
-    }
-  }, [movie?.id, authReady]);
-
-  // Send Comment - Post a new top-level comment
-  const sendComment = async () => {
-    if (!newComment.trim()) {
-      alert('Please enter a comment.');
-      return;
-    }
-    if (!movie?.id) {
-      alert('Movie ID not available.');
-      return;
-    }
-    if (!auth.currentUser) {
-      alert('Authentication not ready. Please wait or refresh.');
-      return;
-    }
-    if (!authReady) {
-      alert('Authenticating... Please wait.');
-      return;
-    }
-
-    const pageId = `movie-${movie.id}`;
-    setSending(true);
-    try {
-      console.log('Sending comment:', { content: newComment, author: authorName || 'Anonymous', gif: newGifUrl });
-      const commentsRef = ref(db, `comments/${pageId}`);
-      const newCommentRef = push(commentsRef);
-      const commentData: Comment = {
-        id: newCommentRef.key || '',
-        content: newComment,
-        author: authorName.trim() || 'Anonymous',
-        authorId: auth.currentUser.uid,
-        timestamp: Date.now(),
-        gifUrl: handleGifInput(newGifUrl),
-        reactions: { like: {}, love: {}, laugh: {}, wow: {}, sad: {} },
-        replies: [],
-      };
-      await update(newCommentRef, commentData);
-      setNewComment('');
-      setAuthorName('');
-      setNewGifUrl('');
-      setShowGifInput(false);
-      alert('Comment posted successfully!');
-    } catch (error) {
-      console.error('Error adding comment:', error);
-      alert('Failed to post comment. Check console for details.');
-    } finally {
-      setSending(false);
-    }
-  };
-
-  // Send Reply - Post a reply to a comment
-  const sendReply = async (parentId: string) => {
-    const replyText = newReply[parentId];
-    if (!replyText?.trim()) {
-      alert('Please enter a reply.');
-      return;
-    }
-    if (!movie?.id) {
-      alert('Movie ID not available.');
-      return;
-    }
-    if (!auth.currentUser) {
-      alert('Authentication not ready. Please wait or refresh.');
-      return;
-    }
-    if (!authReady) {
-      alert('Authenticating... Please wait.');
-      return;
-    }
-
-    const pageId = `movie-${movie.id}`;
-    setSending(true);
-    try {
-      console.log('Sending reply to', parentId, ':', replyText);
-      const repliesRef = ref(db, `comments/${pageId}/${parentId}/replies`);
-      const newReplyRef = push(repliesRef);
-      const replyData: Comment = {
-        id: newReplyRef.key || '',
-        content: replyText,
-        author: authorName.trim() || 'Anonymous',
-        authorId: auth.currentUser.uid,
-        timestamp: Date.now(),
-        gifUrl: handleGifInput(newGifUrl),
-        reactions: { like: {}, love: {}, laugh: {}, wow: {}, sad: {} },
-        replies: [],
-      };
-      await update(newReplyRef, replyData);
-      setNewReply({ ...newReply, [parentId]: '' });
-      setNewGifUrl('');
-      setShowGifInput(false);
-      setReplyingTo(null);
-      alert('Reply posted successfully!');
-    } catch (error) {
-      console.error('Error adding reply:', error);
-      alert('Failed to post reply. Check console for details.');
-    } finally {
-      setSending(false);
-    }
-  };
-
-  // Toggle Reaction - Add/remove reaction for comment or reply
-  const toggleReaction = async (commentId: string, reactionKey: string, isReply = false) => {
-    if (!auth.currentUser || !movie?.id) {
-      alert('Authentication required to react.');
-      return;
-    }
-
-    const userId = auth.currentUser.uid;
-    const pageId = `movie-${movie.id}`;
-    const reactionPath = isReply ? `comments/${pageId}/${commentId}/replies/${commentId}/reactions/${reactionKey}` : `comments/${pageId}/${commentId}/reactions/${reactionKey}`;
-
-    try {
-      const comment = comments.find((c) => c.id === commentId) || comments.flatMap((c) => c.replies).find((r) => r.id === commentId);
-      if (!comment) {
-        alert('Comment not found.');
-        return;
-      }
-
-      const currentReactions = comment.reactions[reactionKey] || {};
-      const hasReacted = currentReactions[userId] || false;
-
-      setComments((prev) => {
-        const updateComment = (comments: Comment[]): Comment[] => {
-          return comments.map((c) => {
-            if (c.id === commentId) {
-              const updatedReactions = { ...c.reactions };
-              updatedReactions[reactionKey] = { ...updatedReactions[reactionKey] };
-              if (hasReacted) {
-                delete updatedReactions[reactionKey][userId];
-              } else {
-                updatedReactions[reactionKey][userId] = true;
-              }
-              return { ...c, reactions: updatedReactions };
-            }
-            if (c.replies) {
-              return { ...c, replies: updateComment(c.replies) };
-            }
-            return c;
-          });
-        };
-        return updateComment(prev);
-      });
-
-      const updates: { [key: string]: any } = {};
-      updates[reactionPath] = hasReacted ? { ...currentReactions, [userId]: null } : { ...currentReactions, [userId]: true };
-      await update(ref(db, `/`), updates);
-      console.log(`Toggled ${reactionKey} for ${commentId}`);
-    } catch (error) {
-      console.error('Error toggling reaction:', error);
-      alert('Failed to update reaction.');
-    }
-  };
-
-  // Delete Comment or Reply - Simple moderation
-  const deleteComment = async (commentId: string, isReply = false) => {
-    if (!auth.currentUser || !movie?.id) {
-      alert('Authentication required to delete.');
-      return;
-    }
-    if (confirm('Are you sure you want to delete this comment?')) {
-      const pageId = `movie-${movie.id}`;
-      const path = isReply ? `comments/${pageId}/${commentId}/replies/${commentId}` : `comments/${pageId}/${commentId}`;
-      try {
-        await remove(ref(db, path));
-        alert('Comment deleted successfully!');
-      } catch (error) {
-        console.error('Error deleting comment:', error);
-        alert('Failed to delete comment.');
-      }
-    }
-  };
-
-  // Handle Play Movie
+  // Handle Play Movie - Navigate to watch page
   const handlePlayMovie = () => {
     if (movie) {
       navigate(`/watch/movie/${movie.id}`);
+      console.log('Navigating to watch page for movie:', movie.id);
     }
   };
 
-  // Toggle Favorite
+  // Toggle Favorite - Add/remove from favorites
   const handleToggleFavorite = () => {
     if (!movie) return;
+
     if (isFavorite) {
       removeFromFavorites(movie.id, 'movie');
       setIsFavorite(false);
+      console.log(`Removed movie ${movie.id} from favorites`);
     } else {
       addToFavorites({
         media_id: movie.id,
@@ -467,15 +196,18 @@ const MovieDetailsPage = () => {
         rating: movie.vote_average,
       });
       setIsFavorite(true);
+      console.log(`Added movie ${movie.id} to favorites`);
     }
   };
 
-  // Toggle Watchlist
+  // Toggle Watchlist - Add/remove from watchlist
   const handleToggleWatchlist = () => {
     if (!movie) return;
+
     if (isInMyWatchlist) {
       removeFromWatchlist(movie.id, 'movie');
       setIsInMyWatchlist(false);
+      console.log(`Removed movie ${movie.id} from watchlist`);
     } else {
       addToWatchlist({
         media_id: movie.id,
@@ -487,17 +219,18 @@ const MovieDetailsPage = () => {
         rating: movie.vote_average,
       });
       setIsInMyWatchlist(true);
+      console.log(`Added movie ${movie.id} to watchlist`);
     }
   };
 
-  // Format Runtime
+  // Format Runtime - Convert minutes to hours and minutes
   const formatRuntime = (minutes: number) => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
   };
 
-  // Render Loading State
+  // Render Loading State - Show loading spinner while fetching movie data
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
@@ -506,7 +239,7 @@ const MovieDetailsPage = () => {
     );
   }
 
-  // Render Error State
+  // Render Error State - Display error message with option to return home
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background">
@@ -518,7 +251,7 @@ const MovieDetailsPage = () => {
     );
   }
 
-  // Render Not Found State
+  // Render Not Found State - If movie data is null
   if (!movie) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background">
@@ -530,14 +263,18 @@ const MovieDetailsPage = () => {
     );
   }
 
-  // Main Render
+  // Main Render - Movie details page with GraphComment integration
   return (
     <div className="min-h-screen bg-background">
+      {/* Navigation Bar */}
       <Navbar />
 
-      {/* Backdrop Image Section */}
+      {/* Backdrop Image Section - Hero section with movie backdrop and info */}
       <div className="relative w-full h-[70vh]">
+        {/* Loading Skeleton for Backdrop */}
         {!backdropLoaded && <div className="absolute inset-0 bg-background image-skeleton" />}
+        
+        {/* Back Button */}
         <button
           onClick={() => navigate(-1)}
           className="absolute top-20 left-6 z-10 text-white p-2 rounded-full bg-black/30 hover:bg-black/50 transition-colors"
@@ -545,13 +282,19 @@ const MovieDetailsPage = () => {
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
+
+        {/* Backdrop Image */}
         <img
           src={getImageUrl(movie.backdrop_path, backdropSizes.original)}
           alt={movie.title || 'Movie backdrop'}
           className={`w-full h-full object-cover transition-opacity duration-700 ${backdropLoaded ? 'opacity-100' : 'opacity-0'}`}
           onLoad={() => setBackdropLoaded(true)}
         />
+        
+        {/* Gradient Overlay */}
         <div className="absolute inset-0 details-gradient" />
+        
+        {/* Trailer Overlay - Only on desktop */}
         {!isMobile && trailerKey && (
           <div className="absolute inset-0 bg-black/60">
             <iframe
@@ -562,8 +305,11 @@ const MovieDetailsPage = () => {
             />
           </div>
         )}
+
+        {/* Movie Info Content */}
         <div className="absolute bottom-0 left-0 right-0 p-6 md:p-12 lg:p-16">
           <div className="flex flex-col md:flex-row items-start gap-6 max-w-6xl mx-auto">
+            {/* Poster Image - Hidden on mobile */}
             <div className="hidden md:block flex-shrink-0 w-48 xl:w-64 rounded-lg overflow-hidden shadow-lg">
               <img
                 src={getImageUrl(movie.poster_path, posterSizes.medium)}
@@ -571,6 +317,8 @@ const MovieDetailsPage = () => {
                 className="w-full h-auto"
               />
             </div>
+            
+            {/* Title, Tagline, and Metadata */}
             <div className="flex-1 animate-slide-up">
               {movie.logo_path ? (
                 <div className="relative w-full max-w-[300px] md:max-w-[400px] lg:max-w-[500px] mx-auto mb-4 transition-all duration-300 ease-in-out hover:scale-105">
@@ -588,6 +336,8 @@ const MovieDetailsPage = () => {
                 </h1>
               )}
               {movie.tagline && <p className="text-white/70 mb-4 italic text-lg">{movie.tagline}</p>}
+              
+              {/* Metadata Row - Certification, Release Date, Runtime, Rating, Genres */}
               <div className="flex flex-wrap items-center gap-4 mb-6">
                 {movie.certification && (
                   <div className="flex items-center bg-white/20 px-2 py-1 rounded">
@@ -621,7 +371,11 @@ const MovieDetailsPage = () => {
                   ))}
                 </div>
               </div>
+              
+              {/* Overview */}
               <p className="text-white/80 mb-6">{movie.overview}</p>
+              
+              {/* Action Buttons - Play, Favorite, Watchlist */}
               <div className="flex flex-wrap gap-3">
                 <Button onClick={handlePlayMovie} className="bg-accent hover:bg-accent/80 text-white flex items-center">
                   <Play className="h-4 w-4 mr-2" />
@@ -649,36 +403,53 @@ const MovieDetailsPage = () => {
         </div>
       </div>
 
-      {/* Tabs Section */}
+      {/* Tabs Section - About, Cast, Reviews, Downloads */}
       <div className="max-w-6xl mx-auto px-4 py-8">
         <div className="flex border-b border-white/10 mb-6">
           <button
             className={`py-2 px-4 font-medium whitespace-nowrap ${activeTab === 'about' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'}`}
-            onClick={() => { triggerHaptic(); setActiveTab('about'); }}
+            onClick={() => {
+              triggerHaptic();
+              setActiveTab('about');
+              console.log('Switched to About tab');
+            }}
           >
             About
           </button>
           <button
             className={`py-2 px-4 font-medium whitespace-nowrap ${activeTab === 'cast' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'}`}
-            onClick={() => { triggerHaptic(); setActiveTab('cast'); }}
+            onClick={() => {
+              triggerHaptic();
+              setActiveTab('cast');
+              console.log('Switched to Cast tab');
+            }}
           >
             Cast
           </button>
           <button
             className={`py-2 px-4 font-medium whitespace-nowrap ${activeTab === 'reviews' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'}`}
-            onClick={() => { triggerHaptic(); setActiveTab('reviews'); }}
+            onClick={() => {
+              triggerHaptic();
+              setActiveTab('reviews');
+              console.log('Switched to Reviews tab');
+            }}
           >
             Reviews
           </button>
           <button
             className={`py-2 px-4 font-medium whitespace-nowrap ${activeTab === 'downloads' ? 'text-white border-b-2 border-accent' : 'text-white/60 hover:text-white'}`}
-            onClick={() => { triggerHaptic(); setActiveTab('downloads'); }}
+            onClick={() => {
+              triggerHaptic();
+              setActiveTab('downloads');
+              console.log('Switched to Downloads tab');
+            }}
             style={{ display: user ? undefined : 'none' }}
           >
             Downloads
           </button>
         </div>
 
+        {/* About Tab - Status, Budget, Revenue, Production Companies */}
         {activeTab === 'about' ? (
           <>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -753,257 +524,16 @@ const MovieDetailsPage = () => {
         )}
       </div>
 
-      {/* Recommendations Section */}
-      {recommendations.length > 0 && <ContentRow title="More Like This" media={recommendations} />}
+      {/* Recommendations Section - More Like This */}
+      {recommendations.length > 0 && (
+        <ContentRow title="More Like This" media={recommendations} />
+      )}
 
-      {/* Comments Section */}
+      {/* GraphComment Section - Embedded comments widget */}
       {movie && (
         <div className="max-w-6xl mx-auto px-4 py-8">
           <h3 className="text-xl font-semibold text-white mb-4">Comments</h3>
-          <div className="space-y-4">
-            {/* Comment Form */}
-            <div className="glass p-4 rounded-lg">
-              <div className="flex gap-2 mb-2">
-                <User className="h-5 w-5 text-white/50 mt-1" />
-                <input
-                  type="text"
-                  placeholder="Your name (optional)"
-                  value={authorName}
-                  onChange={(e) => setAuthorName(e.target.value)}
-                  className="flex-1 bg-transparent text-white placeholder-white/50 border-b border-white/20 focus:outline-none"
-                  maxLength={50}
-                  disabled={!authReady}
-                />
-              </div>
-              <div className="flex gap-2 mb-2">
-                <input
-                  type="text"
-                  placeholder="Add a comment..."
-                  value={newComment}
-                  onChange={(e) => setNewComment(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && sendComment()}
-                  className="flex-1 bg-transparent text-white placeholder-white/50 border-b border-white/20 focus:outline-none"
-                  maxLength={500}
-                  disabled={!authReady}
-                />
-                <Button onClick={sendComment} disabled={sending || !newComment.trim() || !authReady}>
-                  {sending ? 'Sending...' : <Send className="h-4 w-4" />}
-                </Button>
-              </div>
-              {showGifInput && (
-                <div className="flex gap-2 mb-2">
-                  <input
-                    type="text"
-                    placeholder="Paste GIF URL (e.g., from Giphy)"
-                    value={newGifUrl}
-                    onChange={(e) => setNewGifUrl(e.target.value)}
-                    className="flex-1 bg-transparent text-white placeholder-white/50 border-b border-white/20 focus:outline-none"
-                    maxLength={200}
-                    disabled={!authReady}
-                  />
-                  <Button onClick={() => { setShowGifInput(false); setNewGifUrl(''); }} variant="outline" disabled={!authReady}>
-                    Cancel
-                  </Button>
-                </div>
-              )}
-              <button
-                onClick={() => setShowGifInput(!showGifInput)}
-                className="text-white/70 text-sm hover:text-white transition-colors"
-                disabled={!authReady}
-              >
-                {showGifInput ? 'Cancel GIF' : 'Add GIF'}
-              </button>
-              {!authReady && <p className="text-white/50 text-sm mt-2">Initializing authentication...</p>}
-            </div>
-
-            {/* Comments List */}
-            <div className="space-y-4">
-              {commentsLoading ? (
-                <p className="text-white/70 text-center">Loading comments...</p>
-              ) : comments.length === 0 ? (
-                <p className="text-white/70 text-center">No comments yet. Be the first!</p>
-              ) : (
-                comments.map((comment) => (
-                  <div key={comment.id} className="glass p-4 rounded-lg">
-                    <div className="flex items-start gap-3">
-                      <div className="w-8 h-8 bg-white/10 rounded-full flex items-center justify-center">
-                        <User className="h-4 w-4 text-white" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-medium text-white">{comment.author || 'Anonymous'}</span>
-                          <Clock className="h-3 w-3 text-white/50" />
-                          <span className="text-xs text-white/50">{formatTimestamp(comment.timestamp)}</span>
-                        </div>
-                        <p className="text-white mb-3">{comment.content}</p>
-                        {comment.gifUrl && <img src={comment.gifUrl} alt="GIF" className="max-w-32 rounded mb-3" />}
-                        <div className="flex items-center gap-2 mb-3">
-                          {emojiReactions.map(({ key, emoji, label }) => (
-                            <button
-                              key={key}
-                              onClick={() => toggleReaction(comment.id, key)}
-                              className="flex items-center gap-1 text-xs text-white/70 hover:text-white transition-colors"
-                              title={label}
-                              disabled={!authReady}
-                            >
-                              {emoji}
-                              <span>{Object.keys(comment.reactions[key] || {}).length}</span>
-                            </button>
-                          ))}
-                        </div>
-                        <button
-                          onClick={() => deleteComment(comment.id)}
-                          className="text-red-400 text-xs hover:text-red-300 mr-2"
-                          disabled={!authReady}
-                        >
-                          Delete
-                        </button>
-                        <button
-                          onClick={() => setReplyingTo(comment.id)}
-                          className="text-white/70 text-xs hover:text-white flex items-center gap-1"
-                          disabled={!authReady}
-                        >
-                          <Reply className="h-3 w-3" />
-                          Reply
-                        </button>
-                      </div>
-                    </div>
-                    {replyingTo === comment.id && (
-                      <div className="mt-4 p-3 bg-white/5 rounded">
-                        <input
-                          type="text"
-                          placeholder="Reply to this comment..."
-                          value={newReply[comment.id] || ''}
-                          onChange={(e) => setNewReply({ ...newReply, [comment.id]: e.target.value })}
-                          className="w-full bg-transparent text-white placeholder-white/50 border-b border-white/20 focus:outline-none mb-2"
-                          maxLength={500}
-                          disabled={!authReady}
-                        />
-                        <div className="flex gap-2">
-                          <Button
-                            onClick={() => sendReply(comment.id)}
-                            disabled={sending || !newReply[comment.id]?.trim() || !authReady}
-                            size="sm"
-                          >
-                            {sending ? 'Sending...' : 'Reply'}
-                          </Button>
-                          <Button
-                            onClick={() => { setNewReply({ ...newReply, [comment.id]: '' }); setReplyingTo(null); }}
-                            variant="outline"
-                            size="sm"
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                    {comment.replies && comment.replies.length > 0 && (
-                      <div className="ml-8 mt-4 space-y-2">
-                        {comment.replies.map((reply) => (
-                          <div key={reply.id} className="glass p-3 rounded border-l-2 border-accent/50">
-                            <div className="flex items-start gap-2">
-                              <div className="w-6 h-6 bg-white/10 rounded-full flex items-center justify-center">
-                                <User className="h-3 w-3 text-white" />
-                              </div>
-                              <div className="flex-1">
-                                <div className="flex items-center gap-1 mb-1">
-                                  <span className="font-medium text-white text-sm">{reply.author || 'Anonymous'}</span>
-                                  <Clock className="h-2 w-2 text-white/50" />
-                                  <span className="text-xs text-white/50">{formatTimestamp(reply.timestamp)}</span>
-                                </div>
-                                <p className="text-white text-sm mb-2">{reply.content}</p>
-                                {reply.gifUrl && <img src={reply.gifUrl} alt="GIF" className="max-w-24 rounded mb-2" />}
-                                <div className="flex items-center gap-1 mb-2">
-                                  {emojiReactions.map(({ key, emoji, label }) => (
-                                    <button
-                                      key={key}
-                                      onClick={() => toggleReaction(reply.id, key, true)}
-                                      className="flex items-center gap-1 text-xs text-white/70 hover:text-white transition-colors"
-                                      title={label}
-                                      disabled={!authReady}
-                                    >
-                                      {emoji}
-                                      <span>{Object.keys(reply.reactions[key] || {}).length}</span>
-                                    </button>
-                                  ))}
-                                </div>
-                                <button
-                                  onClick={() => deleteComment(reply.id, true)}
-                                  className="text-red-400 text-xs hover:text-red-300 mr-2"
-                                  disabled={!authReady}
-                                >
-                                  Delete
-                                </button>
-                                <button
-                                  onClick={() => setReplyingTo(reply.id)}
-                                  className="text-white/70 text-xs hover:text-white flex items-center gap-1"
-                                  disabled={!authReady}
-                                >
-                                  <Reply className="h-3 w-3" />
-                                  Reply
-                                </button>
-                              </div>
-                            </div>
-                            {replyingTo === reply.id && (
-                              <div className="mt-2 p-2 bg-white/5 rounded">
-                                <input
-                                  type="text"
-                                  placeholder="Reply to this reply..."
-                                  value={newReply[reply.id] || ''}
-                                  onChange={(e) => setNewReply({ ...newReply, [reply.id]: e.target.value })}
-                                  className="w-full bg-transparent text-white placeholder-white/50 border-b border-white/20 focus:outline-none mb-2"
-                                  maxLength={500}
-                                  disabled={!authReady}
-                                />
-                                <div className="flex gap-2">
-                                  <Button
-                                    onClick={() => sendReply(reply.id)}
-                                    disabled={sending || !newReply[reply.id]?.trim() || !authReady}
-                                    size="sm"
-                                  >
-                                    {sending ? 'Sending...' : 'Reply'}
-                                  </Button>
-                                  <Button
-                                    onClick={() => { setNewReply({ ...newReply, [reply.id]: '' }); setReplyingTo(null); }}
-                                    variant="outline"
-                                    size="sm"
-                                  >
-                                    Cancel
-                                  </Button>
-                                </div>
-                              </div>
-                            )}
-                            {reply.replies && reply.replies.length > 0 && (
-                              <div className="ml-4 mt-2 space-y-1">
-                                {reply.replies.map((subReply) => (
-                                  <div key={subReply.id} className="glass p-2 rounded border-l-2 border-accent/30">
-                                    <div className="flex items-start gap-1">
-                                      <div className="w-5 h-5 bg-white/10 rounded-full flex items-center justify-center">
-                                        <User className="h-2.5 w-2.5 text-white" />
-                                      </div>
-                                      <div className="flex-1">
-                                        <div className="flex items-center gap-1">
-                                          <span className="font-medium text-white text-xs">{subReply.author || 'Anonymous'}</span>
-                                          <Clock className="h-1.5 w-1.5 text-white/50" />
-                                          <span className="text-xs text-white/50">{formatTimestamp(subReply.timestamp)}</span>
-                                        </div>
-                                        <p className="text-white text-xs">{subReply.content}</p>
-                                        {subReply.gifUrl && <img src={subReply.gifUrl} alt="GIF" className="max-w-16 rounded" />}
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+          <div id="graphcomment"></div>
         </div>
       )}
     </div>
