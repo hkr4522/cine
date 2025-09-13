@@ -107,47 +107,39 @@ const MovieDetailsPage = () => {
     }
   }, [movie?.id, isInFavorites, isInWatchlist]);
 
-  // Disqus integration
+  // Initialize Facebook SDK
   useEffect(() => {
-    if (!movie?.id) return;
-
-    // Define Disqus configuration
-    (window as any).disqus_config = function () {
-      this.page.url = window.location.href; // Current page URL
-      this.page.identifier = `movie-${movie.id}`; // Unique identifier for the movie
-      this.page.title = movie.title; // Movie title
-    };
-
-    // Load Disqus script
-    const loadDisqus = () => {
-      const d = document;
-      const s = d.createElement('script');
-      s.src = 'https://cinepapa.disqus.com/embed.js';
-      s.setAttribute('data-timestamp', `${+new Date()}`);
-      s.async = true;
-      (d.head || d.body).appendChild(s);
-    };
-
-    // Reset or load Disqus
-    if ((window as any).DISQUS) {
-      // Reset Disqus for new movie
-      (window as any).DISQUS.reset({
-        reload: true,
-        config: (window as any).disqus_config,
-      });
-    } else {
-      // Load Disqus for the first time
-      loadDisqus();
-    }
-
-    // Cleanup: Clear thread content (but keep script for performance)
-    return () => {
-      const disqusThread = document.getElementById('disqus_thread');
-      if (disqusThread) {
-        disqusThread.innerHTML = '';
+    // Load Facebook SDK
+    const loadFacebookSDK = () => {
+      if (!(window as any).FB) {
+        const script = document.createElement('script');
+        script.src = 'https://connect.facebook.net/en_US/sdk.js#xfbml=1&version=v20.0';
+        script.async = true;
+        script.defer = true;
+        script.crossOrigin = 'anonymous';
+        script.onload = () => {
+          (window as any).FB.init({
+            xfbml: true, // Parse XFBML tags (like the comments plugin)
+            version: 'v20.0',
+          });
+        };
+        document.body.appendChild(script);
+      } else {
+        // If SDK is already loaded, re-parse the comments plugin
+        (window as any).FB.XFBML.parse();
       }
     };
-  }, [movie?.id, movie?.title]);
+
+    loadFacebookSDK();
+
+    // Cleanup: Remove the SDK script on component unmount (optional)
+    return () => {
+      const script = document.querySelector('script[src="https://connect.facebook.net/en_US/sdk.js#xfbml=1&version=v20.0"]');
+      if (script) {
+        document.body.removeChild(script);
+      }
+    };
+  }, []);
 
   const handlePlayMovie = () => {
     if (movie) {
@@ -498,7 +490,7 @@ const MovieDetailsPage = () => {
           </div>
         )}
       </div>
-      
+
       {/* Recommendations Section */}
       {recommendations.length > 0 && (
         <ContentRow
@@ -506,14 +498,16 @@ const MovieDetailsPage = () => {
           media={recommendations}
         />
       )}
-      
-      {/* Disqus Comments Section */}
+
+      {/* Facebook Comments Section */}
       <div className="max-w-6xl mx-auto px-4 py-8">
         <h3 className="text-xl font-semibold text-white mb-4">Comments</h3>
-        <div id="disqus_thread"></div>
-        <noscript>
-          Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a>
-        </noscript>
+        <div
+          className="fb-comments"
+          data-href={movie ? `${window.location.origin}/movie/${movie.id}` : window.location.href}
+          data-width="100%"
+          data-numposts="5"
+        ></div>
       </div>
     </div>
   );
