@@ -19,6 +19,11 @@ type TabType = 'about' | 'cast' | 'reviews' | 'downloads';
 
 // Main Movie Details Component
 const MovieDetailsPage = () => {
+  // Log Node.js version for debugging
+  useEffect(() => {
+    console.log(`Running on Node.js version: ${process.version}`);
+  }, []);
+
   // Routing and Navigation
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -226,8 +231,7 @@ const MovieDetailsPage = () => {
         poster_path: movie.poster_path,
         backdrop_path: movie.backdrop_path,
         overview: movie.overview,
-        rating: movie.vot
-        e_average,
+        rating: movie.vote_average,
       });
       setIsInMyWatchlist(true);
       console.log(`Added movie ${movie.id} to watchlist`);
