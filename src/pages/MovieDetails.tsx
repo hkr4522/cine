@@ -7,12 +7,57 @@ import { Button } from '@/components/ui/button';
 import Navbar from '@/components/Navbar';
 import ContentRow from '@/components/ContentRow';
 import ReviewSection from '@/components/ReviewSection';
-import { Play, Clock, Calendar, Star, ArrowLeft, Shield, Heart, Bookmark } from 'lucide-react';
+import { Play, Clock, Calendar, Star, ArrowLeft, Shield, Heart, Bookmark, Send, User } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useWatchHistory } from '@/hooks/watch-history';
 import { DownloadSection } from '@/components/DownloadSection';
 import { useAuth } from '@/hooks';
 import { useHaptic } from '@/hooks/useHaptic';
+import { initializeApp } from 'firebase/app';
+import { getAnalytics } from 'firebase/analytics';
+import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+
+// Firebase Configuration
+const firebaseConfig = {
+  apiKey: 'AIzaSyDs4m55HdwEbh2nhr8lzauK-1vj3otkQmA',
+  authDomain: 'cinecomments.firebaseapp.com',
+  projectId: 'cinecomments',
+  storageBucket: 'cinecomments.firebasestorage.app',
+  messagingSenderId: '737334252175',
+  appId: '1:737334252175:web:39c899d69a89e40ea1d6fa',
+  measurementId: 'G-316F01H04G',
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+const db = getFirestore(app);
+const auth = getAuth(app);
+
+// Comment Interface
+interface Comment {
+  id: string;
+  content: string;
+  author: string;
+  timestamp: any; // Firestore Timestamp
+  reactions: { [key: string]: string[] }; // e.g., { like: ['user1'], love: ['user2'] }
+}
+
+// Emoji Reactions
+const emojiReactions = [
+  { key: 'like', emoji: '👍', label: 'Like' },
+  { key: 'love', emoji: '❤️', label: 'Love' },
+  { key: 'laugh', emoji: '😂', label: 'Laugh' },
+  { key: 'wow', emoji: '😮', label: 'Wow' },
+  { key: 'sad', emoji: '😢', label: 'Sad' },
+];
+
+// Timestamp Formatter
+const formatTimestamp = (date: Date | undefined) => {
+  if (!date) return 'Just now';
+  return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
 
 type TabType = 'about' | 'cast' | 'reviews' | 'downloads';
 
@@ -42,6 +87,14 @@ const MovieDetailsPage = () => {
   const { triggerHaptic } = useHaptic();
   const { user } = useAuth();
 
+  // Comment States
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [newComment, setNewComment] = useState('');
+  const [authorName, setAuthorName] = useState('');
+  const [commentsLoading, setCommentsLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+
+  // Fetch Movie Data
   useEffect(() => {
     const fetchMovieData = async () => {
       if (!id) {
@@ -85,6 +138,7 @@ const MovieDetailsPage = () => {
     fetchMovieData();
   }, [id]);
 
+  // Fetch Trailer
   useEffect(() => {
     const fetchTrailer = async () => {
       if (movie?.id) {
@@ -100,6 +154,7 @@ const MovieDetailsPage = () => {
     fetchTrailer();
   }, [movie?.id]);
 
+  // Watch History
   useEffect(() => {
     if (movie?.id) {
       setIsFavorite(isInFavorites(movie.id, 'movie'));
@@ -107,39 +162,101 @@ const MovieDetailsPage = () => {
     }
   }, [movie?.id, isInFavorites, isInWatchlist]);
 
-  // Initialize Facebook SDK
+  // Firebase Comments Logic
   useEffect(() => {
-    // Load Facebook SDK
-    const loadFacebookSDK = () => {
-      if (!(window as any).FB) {
-        const script = document.createElement('script');
-        script.src = 'https://connect.facebook.net/en_US/sdk.js#xfbml=1&version=v20.0';
-        script.async = true;
-        script.defer = true;
-        script.crossOrigin = 'anonymous';
-        script.onload = () => {
-          (window as any).FB.init({
-            xfbml: true, // Parse XFBML tags (like the comments plugin)
-            version: 'v20.0',
-          });
-        };
-        document.body.appendChild(script);
-      } else {
-        // If SDK is already loaded, re-parse the comments plugin
-        (window as any).FB.XFBML.parse();
+    // Sign in anonymously
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        try {
+          await signInAnonymously(auth);
+        } catch (error) {
+          console.error('Error signing in anonymously:', error);
+        }
       }
-    };
+    });
 
-    loadFacebookSDK();
+    // Fetch comments in real-time
+    if (movie?.id) {
+      const q = query(collection(db, `comments/movie-${movie.id}/items`), orderBy('timestamp', 'desc'));
+      const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
+        const loadedComments: Comment[] = [];
+        snapshot.forEach((doc) => {
+          loadedComments.push({ id: doc.id, ...doc.data() } as Comment);
+        });
+        setComments(loadedComments);
+        setCommentsLoading(false);
+      }, (error) => {
+        console.error('Error fetching comments:', error);
+        setCommentsLoading(false);
+      });
 
-    // Cleanup: Remove the SDK script on component unmount (optional)
-    return () => {
-      const script = document.querySelector('script[src="https://connect.facebook.net/en_US/sdk.js#xfbml=1&version=v20.0"]');
-      if (script) {
-        document.body.removeChild(script);
-      }
-    };
-  }, []);
+      return () => {
+        unsubscribeAuth();
+        unsubscribeSnapshot();
+      };
+    }
+  }, [movie?.id]);
+
+  const sendComment = async () => {
+    if (!newComment.trim() || !movie?.id || !auth.currentUser) return;
+
+    setSending(true);
+    try {
+      await addDoc(collection(db, `comments/movie-${movie.id}/items`), {
+        content: newComment,
+        author: authorName.trim() || 'Anonymous',
+        timestamp: serverTimestamp(),
+        reactions: {
+          like: [],
+          love: [],
+          laugh: [],
+          wow: [],
+          sad: [],
+        },
+      });
+      setNewComment('');
+      setAuthorName('');
+    } catch (error) {
+      console.error('Error adding comment:', error);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const reactToComment = async (commentId: string, reaction: string) => {
+    if (!auth.currentUser || !movie?.id) return;
+
+    const userId = auth.currentUser.uid;
+    const commentRef = doc(db, `comments/movie-${movie.id}/items`, commentId);
+
+    try {
+      // Optimistically update UI
+      setComments((prev) =>
+        prev.map((c) =>
+          c.id === commentId
+            ? {
+                ...c,
+                reactions: {
+                  ...c.reactions,
+                  [reaction]: c.reactions[reaction].includes(userId)
+                    ? c.reactions[reaction].filter((id) => id !== userId)
+                    : [...c.reactions[reaction], userId],
+                },
+              }
+            : c
+        )
+      );
+
+      // Update Firestore
+      await updateDoc(commentRef, {
+        [`reactions.${reaction}`]: c.reactions[reaction].includes(userId)
+          ? arrayRemove(userId)
+          : arrayUnion(userId),
+      });
+    } catch (error) {
+      console.error('Error updating reaction:', error);
+    }
+  };
 
   const handlePlayMovie = () => {
     if (movie) {
@@ -483,7 +600,6 @@ const MovieDetailsPage = () => {
             {movie && <DownloadSection mediaName={movie.title} />}
           </div>
         ) : (
-          /* Reviews section */
           <div className="mb-8">
             <h3 className="text-xl font-semibold text-white mb-4">User Reviews</h3>
             <ReviewSection mediaId={parseInt(id!, 10)} mediaType="movie" />
@@ -493,22 +609,87 @@ const MovieDetailsPage = () => {
 
       {/* Recommendations Section */}
       {recommendations.length > 0 && (
-        <ContentRow
-          title="More Like This"
-          media={recommendations}
-        />
+        <ContentRow title="More Like This" media={recommendations} />
       )}
 
-      {/* Facebook Comments Section */}
-      <div className="max-w-6xl mx-auto px-4 py-8">
-        <h3 className="text-xl font-semibold text-white mb-4">Comments</h3>
-        <div
-          className="fb-comments"
-          data-href={movie ? `${window.location.origin}/movie/${movie.id}` : window.location.href}
-          data-width="100%"
-          data-numposts="5"
-        ></div>
-      </div>
+      {/* Custom Comments Section */}
+      {movie && (
+        <div className="max-w-6xl mx-auto px-4 py-8">
+          <h3 className="text-xl font-semibold text-white mb-4">Comments</h3>
+          <div className="space-y-4">
+            {/* Comment Form */}
+            <div className="glass p-4 rounded-lg">
+              <div className="flex gap-2 mb-2">
+                <User className="h-5 w-5 text-white/50 mt-1" />
+                <input
+                  type="text"
+                  placeholder="Your name (optional)"
+                  value={authorName}
+                  onChange={(e) => setAuthorName(e.target.value)}
+                  className="flex-1 bg-transparent text-white placeholder-white/50 border-b border-white/20 focus:outline-none"
+                  maxLength={50}
+                />
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Add a comment..."
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && sendComment()}
+                  className="flex-1 bg-transparent text-white placeholder-white/50 border-b border-white/20 focus:outline-none"
+                  maxLength={500}
+                />
+                <Button onClick={sendComment} disabled={sending || !newComment.trim()}>
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Comments List */}
+            <div className="space-y-4">
+              {commentsLoading ? (
+                <p className="text-white/70 text-center">Loading comments...</p>
+              ) : comments.length === 0 ? (
+                <p className="text-white/70 text-center">No comments yet. Be the first!</p>
+              ) : (
+                comments.map((comment) => (
+                  <div key={comment.id} className="glass p-4 rounded-lg">
+                    <div className="flex items-start gap-3">
+                      <div className="w-8 h-8 bg-white/10 rounded-full flex items-center justify-center">
+                        <User className="h-4 w-4 text-white" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-medium text-white">{comment.author || 'Anonymous'}</span>
+                          <Clock className="h-3 w-3 text-white/50" />
+                          <span className="text-xs text-white/50">
+                            {formatTimestamp(comment.timestamp?.toDate())}
+                          </span>
+                        </div>
+                        <p className="text-white mb-3">{comment.content}</p>
+                        <div className="flex items-center gap-2">
+                          {emojiReactions.map(({ key, emoji, label }) => (
+                            <button
+                              key={key}
+                              onClick={() => reactToComment(comment.id, key)}
+                              className="flex items-center gap-1 text-xs text-white/70 hover:text-white transition-colors"
+                              title={label}
+                            >
+                              <span>{emoji}</span>
+                              <span>{comment.reactions[key]?.length || 0}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
