@@ -121,7 +121,8 @@ const TVShowDetailsPage = () => {
   const { triggerHaptic } = useHaptic();
   const toastShownRef = useRef<Set<string>>(new Set()); // Track shown toasts
   const hasInitializedRef = useRef(false); // Prevent multiple initializations
-  const [commentoError, setCommentoError] = useState<string | null>(null); // Track Commento loading errors
+  const commentoRef = useRef<HTMLDivElement>(null); // Reference to Commento container
+  const [commentoError, setCommentoError] = useState<string | null>(null); // Track Commento errors
 
   // State Management
   const [activeTab, setActiveTab] = useState<TabType>('episodes');
@@ -214,7 +215,7 @@ const TVShowDetailsPage = () => {
     }
   }, [tvShow, episodes, getLastWatchedEpisode, isTVShowValid, isEpisodesValid, addToast]);
 
-  // Initialize Commento with MutationObserver
+  // Initialize Commento with Enhanced MutationObserver
   useEffect(() => {
     if (!tvShow?.id) {
       console.warn('No TV show ID for Commento initialization');
@@ -227,42 +228,84 @@ const TVShowDetailsPage = () => {
 
     const initializeCommento = () => {
       const commentoDiv = document.getElementById('commento');
-      if (commentoDiv) {
-        commentoDiv.setAttribute('data-page-id', pageId);
-        console.log(`Commento container found, set data-page-id: ${pageId}`);
-        // Check if Commento widget is initialized
-        setTimeout(() => {
-          if (!window.commento) {
-            console.error('Commento widget not initialized');
-            setCommentoError('Failed to initialize comments. Please refresh the page or check your Commento configuration.');
-          } else {
-            console.log('Commento widget initialized successfully');
-            setCommentoError(null);
-            // Force Commento to reinitialize
-            if (typeof window.commento.main === 'function') {
-              window.commento.main();
-              console.log('Commento reinitialized via window.commento.main()');
-            }
-          }
-        }, 2000);
-      } else {
+      if (!commentoDiv) {
         console.error('Commento container not found');
-        setCommentoError('Failed to load comments: Comment container not found. Please refresh the page.');
+        setCommentoError(
+          'Failed to load comments: Comment container not found. Please refresh the page or check console for details.'
+        );
+        return;
       }
+
+      // Ensure data-page-id is set
+      if (commentoDiv.getAttribute('data-page-id') !== pageId) {
+        commentoDiv.setAttribute('data-page-id', pageId);
+        console.log(`Manually set data-page-id: ${pageId}`);
+      }
+
+      // Retry Commento initialization
+      let retryCount = 0;
+      const maxRetries = 5;
+      const retryInterval = 2000; // 2 seconds
+
+      const tryInitialize = () => {
+        if (!window.commento) {
+          console.warn(`Commento script not loaded, retrying (${retryCount + 1}/${maxRetries})`);
+          if (retryCount < maxRetries) {
+            retryCount++;
+            setTimeout(tryInitialize, retryInterval);
+            return;
+          }
+          console.error('Commento script failed to load after max retries');
+          setCommentoError(
+            'Failed to load comments: Commento script not loaded. Check network or ad-blocker settings.'
+          );
+          return;
+        }
+
+        if (typeof window.commento.main === 'function') {
+          window.commento.main();
+          console.log('Commento initialized via window.commento.main()');
+          setTimeout(() => {
+            const widget = document.querySelector('#commento .commento-card');
+            if (!widget) {
+              console.error('Commento widget not rendered');
+              setCommentoError(
+                'Failed to load comments: Widget not rendered. Please refresh the page or contact Commento support.'
+              );
+            } else {
+              console.log('Commento widget successfully rendered');
+              setCommentoError(null);
+            }
+          }, 1000);
+        } else {
+          console.error('window.commento.main is not a function');
+          setCommentoError(
+            'Failed to load comments: Commento initialization failed. Check console for details or contact Commento support.'
+          );
+        }
+      };
+
+      console.log('Attempting Commento initialization');
+      tryInitialize();
     };
 
-    // MutationObserver to detect when #commento is added to DOM
+    // MutationObserver to detect #commento
     const observer = new MutationObserver((mutations) => {
+      let commentoDivFound = false;
       mutations.forEach((mutation) => {
         if (mutation.addedNodes.length) {
           const commentoDiv = document.getElementById('commento');
           if (commentoDiv) {
             console.log('Commento container detected via MutationObserver');
+            commentoDivFound = true;
             initializeCommento();
-            observer.disconnect(); // Stop observing once found
           }
         }
       });
+      if (commentoDivFound) {
+        observer.disconnect();
+        console.log('MutationObserver disconnected after finding Commento container');
+      }
     });
 
     observer.observe(document.body, {
@@ -270,20 +313,27 @@ const TVShowDetailsPage = () => {
       subtree: true,
     });
 
-    // Initial check in case container is already present
+    // Initial check
     if (document.getElementById('commento')) {
       console.log('Commento container already present on mount');
       initializeCommento();
       observer.disconnect();
     }
 
-    // Fallback: Retry after 5 seconds if not found
+    // Fallback: Retry after 10 seconds
     const retryTimeout = setTimeout(() => {
       if (!document.getElementById('commento')) {
-        console.error('Commento container not found after 5 seconds');
-        setCommentoError('Failed to load comments: Comment container not found after retry. Please refresh the page.');
+        console.error('Commento container not found after 10 seconds');
+        setCommentoError(
+          'Failed to load comments: Comment container not found after retry. Please refresh the page and check console logs.'
+        );
+      } else if (!window.commento) {
+        console.error('Commento script not loaded after 10 seconds');
+        setCommentoError(
+          'Failed to load comments: Commento script not loaded. Check network or ad-blocker settings.'
+        );
       }
-    }, 5000);
+    }, 10000);
 
     return () => {
       observer.disconnect();
@@ -1126,6 +1176,14 @@ const TVShowDetailsPage = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Commento Container (Always Rendered) */}
+      <div
+        id="commento"
+        ref={commentoRef}
+        data-page-id={tvShow ? `tv-${tvShow.id}` : ''}
+        style={{ display: 'none' }}
+      ></div>
+
       {/* Navbar */}
       <Navbar />
 
@@ -1182,7 +1240,7 @@ const TVShowDetailsPage = () => {
           <h3 className="text-xl font-semibold text-white mb-4">Comments</h3>
           {commentoError ? (
             <p className="text-red-600">
-              {commentoError} Please ensure your domain is registered in Commento and try refreshing the page. Contact support if the issue persists.
+              {commentoError} Open DevTools (F12), check Console and Network tabs, and verify Commento script load.
             </p>
           ) : (
             <div id="commento" data-page-id={`tv-${tvShow.id}`}></div>
