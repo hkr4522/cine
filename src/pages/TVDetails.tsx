@@ -121,6 +121,8 @@ const TVShowDetailsPage = () => {
   const { triggerHaptic } = useHaptic();
   const toastShownRef = useRef<Set<string>>(new Set()); // Track shown toasts
   const hasInitializedRef = useRef(false); // Prevent multiple initializations
+  const commentoScriptRef = useRef<HTMLScriptElement | null>(null); // Track Commento script
+  const [commentoError, setCommentoError] = useState<string | null>(null); // Track Commento loading errors
 
   // State Management
   const [activeTab, setActiveTab] = useState<TabType>('episodes');
@@ -180,10 +182,9 @@ const TVShowDetailsPage = () => {
     try {
       hasInitializedRef.current = true;
       if (!isEpisodesValid) {
-        console.warn('No valid episodes; setting default Season 1, Episode 1');
+        console.warn('No valid episodes; silently setting default Season 1, Episode 1');
         setSelectedSeasonNumber(1);
         setSelectedEpisodeNumber(1);
-        addToast('No episodes available for download. Using default Season 1, Episode 1.', true);
         return;
       }
 
@@ -203,10 +204,9 @@ const TVShowDetailsPage = () => {
             `Initialized download overlay with latest episode - Season: ${latestEpisode.season_number}, Episode: ${latestEpisode.episode_number}`
           );
         } else {
-          console.warn('No valid episodes found; defaulting to Season 1, Episode 1');
+          console.warn('No valid episodes found; silently setting default Season 1, Episode 1');
           setSelectedSeasonNumber(1);
           setSelectedEpisodeNumber(1);
-          addToast('No episodes available for download. Using default Season 1, Episode 1.', true);
         }
       }
     } catch (err) {
@@ -214,6 +214,64 @@ const TVShowDetailsPage = () => {
       addToast('Failed to initialize download options.', true);
     }
   }, [tvShow, episodes, getLastWatchedEpisode, isTVShowValid, isEpisodesValid, addToast]);
+
+  // Initialize Commento Script
+  useEffect(() => {
+    if (!tvShow?.id) {
+      console.warn('No TV show ID for Commento initialization');
+      setCommentoError('No TV show data available for comments.');
+      return;
+    }
+
+    const pageId = `tv-${tvShow.id}`;
+    console.log('Initializing Commento with pageId:', pageId);
+
+    try {
+      // Check if script already exists
+      if (!document.querySelector('script[src="https://cdn.commento.io/js/commento.js"]')) {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.commento.io/js/commento.js';
+        script.defer = true;
+        script.async = true;
+        script.onload = () => {
+          console.log('Commento script loaded successfully');
+          const commentoDiv = document.getElementById('commento');
+          if (commentoDiv) {
+            commentoDiv.setAttribute('data-page-id', pageId);
+            console.log(`Commento initialized with data-page-id: ${pageId}`);
+            // Check if Commento widget is initialized
+            setTimeout(() => {
+              if (!window.commento) {
+                console.error('Commento widget not initialized');
+                setCommentoError('Failed to initialize comments. Please try again later.');
+              }
+            }, 5000); // Wait 5 seconds to check initialization
+          } else {
+            console.error('Commento div not found');
+            setCommentoError('Failed to initialize comments: Container not found.');
+          }
+        };
+        script.onerror = () => {
+          console.error('Failed to load Commento script');
+          setCommentoError('Failed to load comments system.');
+        };
+
+        document.head.appendChild(script);
+        commentoScriptRef.current = script;
+        console.log('Commento script appended to head');
+      }
+
+      return () => {
+        if (commentoScriptRef.current && commentoScriptRef.current.parentNode) {
+          commentoScriptRef.current.parentNode.removeChild(commentoScriptRef.current);
+          console.log('Commento script removed');
+        }
+      };
+    } catch (err) {
+      console.error('Error initializing Commento:', err);
+      setCommentoError('Error loading comments system.');
+    }
+  }, [tvShow?.id]);
 
   // Handle Share functionality
   const handleShare = useCallback(async () => {
@@ -267,8 +325,11 @@ const TVShowDetailsPage = () => {
           `Opened download overlay for latest episode - TV show ID: ${tvShow.id}, Season: ${latestEpisode.season_number}, Episode: ${latestEpisode.episode_number}`
         );
       } else {
-        console.warn('No latest episode found for download');
-        addToast('No latest episode available for download.', true);
+        console.warn('No latest episode found for download; setting default Season 1, Episode 1');
+        setSelectedSeasonNumber(1);
+        setSelectedEpisodeNumber(1);
+        setShowDownloadOverlay(true);
+        triggerHaptic();
       }
     } catch (err) {
       console.error('Error opening download overlay for latest episode:', err);
@@ -1100,8 +1161,11 @@ const TVShowDetailsPage = () => {
       {tvShow && (
         <div className="max-w-6xl mx-auto px-4 py-8">
           <h3 className="text-xl font-semibold text-white mb-4">Comments</h3>
-          <div id="commento" data-page-id={`tv-${tvShow.id}`}></div>
-          <script defer src="https://cdn.commento.io/js/commento.js"></script>
+          {commentoError ? (
+            <p className="text-red-600">{commentoError}</p>
+          ) : (
+            <div id="commento" data-page-id={`tv-${tvShow.id}`}></div>
+          )}
         </div>
       )}
     </div>
