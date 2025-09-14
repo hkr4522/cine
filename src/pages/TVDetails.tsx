@@ -30,7 +30,6 @@ interface TVShowHeaderProps {
   lastWatchedEpisode: LastWatchedEpisode | null;
   onShare: () => void;
   onDownload: () => void;
-  onWatchLatestEpisode: () => void;
   onDownloadLatestEpisode: () => void;
 }
 interface EpisodeProps {
@@ -120,7 +119,6 @@ const TVShowDetailsPage = () => {
   const isMobile = useIsMobile();
   const { user } = useAuth();
   const { triggerHaptic } = useHaptic();
-  const commentoScriptRef = useRef<HTMLScriptElement | null>(null);
   const toastShownRef = useRef<Set<string>>(new Set()); // Track shown toasts
   const hasInitializedRef = useRef(false); // Prevent multiple initializations
 
@@ -130,7 +128,6 @@ const TVShowDetailsPage = () => {
   const [selectedSeasonNumber, setSelectedSeasonNumber] = useState<number | null>(null);
   const [selectedEpisodeNumber, setSelectedEpisodeNumber] = useState<number | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [isCommentoLoaded, setIsCommentoLoaded] = useState(false);
   const [expandedEpisodes, setExpandedEpisodes] = useState<number[]>([]);
 
   // Fetch TV show details using custom hook
@@ -218,57 +215,6 @@ const TVShowDetailsPage = () => {
     }
   }, [tvShow, episodes, getLastWatchedEpisode, isTVShowValid, isEpisodesValid, addToast]);
 
-  // Initialize Commento for user comments
-  useEffect(() => {
-    if (!tvShow?.id) {
-      console.warn('No TV show ID for Commento initialization');
-      addToast('Cannot load comments: No TV show data.', true);
-      return;
-    }
-
-    console.log('Initializing Commento for TV show ID:', tvShow.id);
-    const pageId = `tv-${tvShow.id}`;
-
-    try {
-      const script = document.createElement('script');
-      script.src = 'https://cdn.commento.io/js/commento.js';
-      script.defer = true;
-      script.async = true;
-      script.onload = () => {
-        console.log('Commento script loaded successfully');
-        const commentoDiv = document.getElementById('commento');
-        if (commentoDiv) {
-          commentoDiv.setAttribute('data-page-id', pageId);
-          setIsCommentoLoaded(true);
-          console.log(`Commento initialized with data-page-id: ${pageId}`);
-        } else {
-          console.error('Commento div not found');
-          addToast('Failed to initialize comments.', true);
-        }
-      };
-      script.onerror = () => {
-        console.error('Failed to load Commento script');
-        addToast('Failed to load comments system.', true);
-      };
-
-      const target = document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0];
-      target.appendChild(script);
-      commentoScriptRef.current = script;
-      console.log('Commento script appended to document');
-
-      return () => {
-        if (commentoScriptRef.current && commentoScriptRef.current.parentNode) {
-          commentoScriptRef.current.parentNode.removeChild(commentoScriptRef.current);
-          console.log('Commento script removed');
-          setIsCommentoLoaded(false);
-        }
-      };
-    } catch (err) {
-      console.error('Error initializing Commento:', err);
-      addToast('Error loading comments system.', true);
-    }
-  }, [tvShow?.id, addToast]);
-
   // Handle Share functionality
   const handleShare = useCallback(async () => {
     if (!isTVShowValid) {
@@ -301,31 +247,6 @@ const TVShowDetailsPage = () => {
       addToast('Failed to share. Please try again.', true);
     }
   }, [tvShow, isTVShowValid, triggerHaptic, addToast]);
-
-  // Handle Watch Latest Episode
-  const handleWatchLatestEpisode = useCallback(() => {
-    if (!isTVShowValid || !isEpisodesValid) {
-      console.warn('No valid TV show or episodes data for playing latest episode');
-      addToast('No episodes available.', true);
-      return;
-    }
-
-    try {
-      const latestEpisode = getLatestEpisode(tvShow.seasons, episodes);
-      if (latestEpisode) {
-        handlePlayEpisode(latestEpisode.season_number, latestEpisode.episode_number);
-        console.log(
-          `Playing latest episode - TV show ID: ${tvShow.id}, Season: ${latestEpisode.season_number}, Episode: ${latestEpisode.episode_number}`
-        );
-      } else {
-        console.warn('No latest episode found');
-        addToast('No latest episode available.', true);
-      }
-    } catch (err) {
-      console.error('Error playing latest episode:', err);
-      addToast('Failed to play latest episode.', true);
-    }
-  }, [tvShow, episodes, isTVShowValid, isEpisodesValid, handlePlayEpisode, addToast]);
 
   // Handle Download Latest Episode
   const handleDownloadLatestEpisode = useCallback(() => {
@@ -404,7 +325,6 @@ const TVShowDetailsPage = () => {
     lastWatchedEpisode,
     onShare,
     onDownload,
-    onWatchLatestEpisode,
     onDownloadLatestEpisode,
   }: TVShowHeaderProps) => {
     const handlePlayLastWatched = useCallback(() => {
@@ -496,13 +416,6 @@ const TVShowDetailsPage = () => {
                 >
                   <Play className="h-4 w-4 mr-2" />
                   Play {lastWatchedEpisode ? `S${lastWatchedEpisode.season_number} E${lastWatchedEpisode.episode_number}` : 'First Episode'}
-                </Button>
-                <Button
-                  onClick={onWatchLatestEpisode}
-                  className="bg-accent hover:bg-accent/80 text-white flex items-center"
-                >
-                  <Play className="h-4 w-4 mr-2" />
-                  Play Latest Episode
                 </Button>
                 <Button
                   onClick={onDownloadLatestEpisode}
@@ -1153,7 +1066,6 @@ const TVShowDetailsPage = () => {
           lastWatchedEpisode={getLastWatchedEpisode()}
           onShare={handleShare}
           onDownload={handleOpenDownload}
-          onWatchLatestEpisode={handleWatchLatestEpisode}
           onDownloadLatestEpisode={handleDownloadLatestEpisode}
         />
       </div>
@@ -1185,10 +1097,11 @@ const TVShowDetailsPage = () => {
       )}
 
       {/* Commento Section */}
-      {tvShow && isCommentoLoaded && (
+      {tvShow && (
         <div className="max-w-6xl mx-auto px-4 py-8">
           <h3 className="text-xl font-semibold text-white mb-4">Comments</h3>
           <div id="commento" data-page-id={`tv-${tvShow.id}`}></div>
+          <script defer src="https://cdn.commento.io/js/commento.js"></script>
         </div>
       )}
     </div>
