@@ -1,4 +1,5 @@
 // src/pages/TVShowDetailsPage.tsx
+
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Play, Download, Share2, Heart, Bookmark } from 'lucide-react';
@@ -13,7 +14,9 @@ import { useHaptic } from '@/hooks/useHaptic';
 import { TVShow, Season, Episode, LastWatchedEpisode } from '@/utils/types';
 import { getImageUrl } from '@/utils/services/tmdb';
 
-// Type Definitions for Type Safety
+// ================================================================================================
+// Type Definitions
+// ================================================================================================
 type TabType = 'episodes' | 'about' | 'cast' | 'reviews' | 'downloads';
 interface Toast {
   message: string;
@@ -52,12 +55,23 @@ interface DownloadSectionProps {
   episodesBySeason: { [key: number]: Episode[] };
 }
 
-// Helper Function: Generate unique ID for toasts
+// ================================================================================================
+// Helper Functions
+// ================================================================================================
+
+/**
+ * Generates a unique ID for toast notifications.
+ * @returns {string} A random string ID.
+ */
 const generateToastId = (): string => {
   return Math.random().toString(36).substring(2, 9);
 };
 
-// Helper Function: Validate TV show data
+/**
+ * Validates the core structure of the TV show data.
+ * @param {TVShow | null} tvShow - The TV show object to validate.
+ * @returns {boolean} True if the data is valid, false otherwise.
+ */
 const validateTVShowData = (tvShow: TVShow | null): boolean => {
   if (!tvShow) {
     console.error('TV show data is null');
@@ -70,7 +84,11 @@ const validateTVShowData = (tvShow: TVShow | null): boolean => {
   return true;
 };
 
-// Helper Function: Validate episodes data
+/**
+ * Validates the structure of the episodes array.
+ * @param {Episode[] | null} episodes - The array of episodes to validate.
+ * @returns {boolean} True if the data is valid, false otherwise.
+ */
 const validateEpisodesData = (episodes: Episode[] | null): boolean => {
   if (!episodes || episodes.length === 0) {
     console.warn('Episodes array is empty or null');
@@ -83,7 +101,13 @@ const validateEpisodesData = (episodes: Episode[] | null): boolean => {
   return isValid;
 };
 
-// Helper Function: Get latest episode with fallback
+/**
+ * Finds the latest episode from the available seasons and episodes.
+ * Provides fallbacks if data is incomplete.
+ * @param {Season[]} seasons - Array of seasons.
+ * @param {Episode[]} episodes - Array of all episodes.
+ * @returns {Episode | null} The latest episode object or a fallback.
+ */
 const getLatestEpisode = (seasons: Season[], episodes: Episode[]): Episode | null => {
   try {
     if (!seasons.length) {
@@ -111,25 +135,31 @@ const getLatestEpisode = (seasons: Season[], episodes: Episode[]): Episode | nul
   }
 };
 
-// Main Component
+// ================================================================================================
+// Main Component: TVShowDetailsPage
+// ================================================================================================
 const TVShowDetailsPage = () => {
-  // Navigation and URL params
+  // --- Core Hooks ---
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { user } = useAuth();
   const { triggerHaptic } = useHaptic();
-  const toastShownRef = useRef<Set<string>>(new Set()); // Track shown toasts
-  const hasInitializedRef = useRef(false); // Prevent multiple initializations
+
+  // --- State Management ---
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('episodes');
   const [showDownloadOverlay, setShowDownloadOverlay] = useState(false);
   const [selectedSeasonNumber, setSelectedSeasonNumber] = useState<number | null>(null);
   const [selectedEpisodeNumber, setSelectedEpisodeNumber] = useState<number | null>(null);
   const [expandedEpisodes, setExpandedEpisodes] = useState<number[]>([]);
-  const [commentoError, setCommentoError] = useState<string | null>(null); // Track Commento errors
+  const [commentoError, setCommentoError] = useState<string | null>(null);
 
-  // Fetch TV show details using custom hook
+  // --- Refs for managing side effects and preventing re-runs ---
+  const toastShownRef = useRef<Set<string>>(new Set()); // Prevents duplicate toast notifications.
+  const hasInitializedRef = useRef(false); // Ensures one-time initialization logic runs only once.
+
+  // --- Custom Hook for fetching TV show data ---
   const {
     tvShow,
     episodes,
@@ -148,12 +178,13 @@ const TVShowDetailsPage = () => {
     getLastWatchedEpisode,
   } = useTVDetails(id);
 
-  // Memoized validation of TV show and episodes
+  // --- Memoized Data Validation ---
   const isTVShowValid = useMemo(() => validateTVShowData(tvShow), [tvShow]);
   const isEpisodesValid = useMemo(() => validateEpisodesData(episodes), [episodes]);
 
-  // Add toast notification with deduplication
+  // --- Toast Notification Logic ---
   const addToast = useCallback((message: string, isError: boolean) => {
+    // Prevent showing the same toast message repeatedly.
     if (toastShownRef.current.has(message)) {
       console.log(`Skipped duplicate toast: ${message}`);
       return;
@@ -162,6 +193,8 @@ const TVShowDetailsPage = () => {
     setToasts((prev) => [...prev, toast]);
     toastShownRef.current.add(message);
     console.log(`Added toast: ${message}, isError: ${isError}, ID: ${toast.id}`);
+
+    // Automatically remove the toast after 3 seconds.
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== toast.id));
       toastShownRef.current.delete(message);
@@ -169,7 +202,12 @@ const TVShowDetailsPage = () => {
     }, 3000);
   }, []);
 
-  // Initialize Download Overlay
+  // --- Effects ---
+
+  /**
+   * Initializes the download overlay with the last watched or latest episode.
+   * Runs only once after the TV show data is validated.
+   */
   useEffect(() => {
     if (!isTVShowValid || hasInitializedRef.current) {
       console.log('Skipping download overlay initialization: Invalid TV show or already initialized');
@@ -189,17 +227,11 @@ const TVShowDetailsPage = () => {
       if (lastWatched) {
         setSelectedSeasonNumber(lastWatched.season_number);
         setSelectedEpisodeNumber(lastWatched.episode_number);
-        console.log(
-          `Initialized download overlay with last watched - Season: ${lastWatched.season_number}, Episode: ${lastWatched.episode_number}`
-        );
       } else {
         const latestEpisode = getLatestEpisode(tvShow.seasons, episodes);
         if (latestEpisode) {
           setSelectedSeasonNumber(latestEpisode.season_number);
           setSelectedEpisodeNumber(latestEpisode.episode_number);
-          console.log(
-            `Initialized download overlay with latest episode - Season: ${latestEpisode.season_number}, Episode: ${latestEpisode.episode_number}`
-          );
         } else {
           console.warn('No valid episodes found; silently setting default Season 1, Episode 1');
           setSelectedSeasonNumber(1);
@@ -212,89 +244,73 @@ const TVShowDetailsPage = () => {
     }
   }, [tvShow, episodes, getLastWatchedEpisode, isTVShowValid, isEpisodesValid, addToast]);
 
-  // Initialize Commento - Dynamic Script Loading with Delay
+  /**
+   * Dynamically loads and initializes the Commento.io script for the comments section.
+   * Cleans up by removing the script when the component unmounts.
+   */
   useEffect(() => {
     if (!tvShow?.id) {
-      console.warn('No TV show ID for Commento initialization');
       setCommentoError('No TV show data available for comments.');
       return;
     }
 
     const pageId = `tv-${tvShow.id}`;
-    console.log('Initializing Commento for TV show ID:', tvShow.id, 'with pageId:', pageId);
-
-    // Load Commento script
     const script = document.createElement('script');
     script.src = 'https://cdn.commento.io/js/commento.js';
     script.defer = true;
     script.async = true;
-    script.setAttribute('type', 'module'); // Ensure script is treated as a module
+    script.setAttribute('type', 'module');
+
     script.onload = () => {
-      console.log('Commento script loaded successfully');
-      // Delay to ensure DOM is ready
+      // Delay initialization to ensure the DOM is ready.
       setTimeout(() => {
         const commentoDiv = document.getElementById('commento');
         if (commentoDiv) {
           commentoDiv.setAttribute('data-page-id', pageId);
-          console.log(`Commento div found, set data-page-id: ${pageId}`);
           if (window.commento && typeof window.commento.main === 'function') {
             try {
               window.commento.main();
-              console.log('Commento initialized via window.commento.main()');
+              // Verify widget rendering after a short delay.
               setTimeout(() => {
                 const widget = document.querySelector('#commento .commento-card');
                 if (!widget) {
-                  console.error('Commento widget not rendered');
-                  setCommentoError(
-                    'Failed to load comments: Widget not rendered. Please refresh the page or contact Commento support.'
-                  );
+                  setCommentoError('Failed to load comments: Widget not rendered.');
                 } else {
-                  console.log('Commento widget successfully rendered');
                   setCommentoError(null);
                 }
               }, 1000);
             } catch (err) {
               console.error('Error calling window.commento.main():', err);
-              setCommentoError(
-                'Failed to load comments: Commento initialization failed. Check console for details or contact Commento support.'
-              );
+              setCommentoError('Failed to load comments: Initialization failed.');
             }
           } else {
-            console.error('window.commento.main is not a function');
-            setCommentoError(
-              'Failed to load comments: Commento initialization failed. Check console for details or contact Commento support.'
-            );
+            setCommentoError('Failed to load comments: `window.commento.main` not found.');
           }
         } else {
-          console.error('Commento div not found');
-          setCommentoError('Failed to load comments: Comment container not found. Please refresh the page.');
+          setCommentoError('Failed to load comments: Comment container not found.');
         }
-      }, 500); // 500ms delay to ensure DOM rendering
+      }, 500);
     };
+
     script.onerror = () => {
-      console.error('Failed to load Commento script');
-      setCommentoError('Failed to load comments: Commento script failed to load. Check network or ad-blocker settings.');
+      setCommentoError('Failed to load comments: Script could not be loaded.');
     };
 
-    // Append script to document
-    const target = document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0];
-    target.appendChild(script);
-    console.log('Commento script appended to document');
+    document.head.appendChild(script);
 
-    // Cleanup
     return () => {
+      // Cleanup: remove the script to avoid memory leaks.
       if (script.parentNode) {
         script.parentNode.removeChild(script);
-        console.log('Commento script removed');
       }
     };
   }, [tvShow?.id]);
 
-  // Handle Share functionality
+  // --- Event Handlers ---
+
   const handleShare = useCallback(async () => {
     if (!isTVShowValid) {
-      console.error('No valid TV show data for sharing');
-      addToast('No TV show data available.', true);
+      addToast('No TV show data available to share.', true);
       return;
     }
 
@@ -308,91 +324,69 @@ const TVShowDetailsPage = () => {
     try {
       if (navigator.share) {
         await navigator.share(shareData);
-        triggerHaptic();
-        console.log(`Shared TV show ${tvShow.id} via Web Share API: ${shareUrl}`);
         addToast('Shared successfully!', false);
       } else {
         await navigator.clipboard.writeText(shareUrl);
-        triggerHaptic();
         addToast('Link copied to clipboard!', false);
-        console.log(`Copied TV show ${tvShow.id} URL to clipboard: ${shareUrl}`);
       }
+      triggerHaptic();
     } catch (error) {
       console.error('Error sharing TV show:', error);
       addToast('Failed to share. Please try again.', true);
     }
   }, [tvShow, isTVShowValid, triggerHaptic, addToast]);
 
-  // Handle Download Latest Episode
   const handleDownloadLatestEpisode = useCallback(() => {
     if (!isTVShowValid) {
-      console.warn('No valid TV show data for download');
       addToast('No TV show data available.', true);
       return;
     }
-
     try {
       const latestEpisode = getLatestEpisode(tvShow.seasons, episodes);
       if (latestEpisode) {
         setSelectedSeasonNumber(latestEpisode.season_number);
         setSelectedEpisodeNumber(latestEpisode.episode_number);
-        setShowDownloadOverlay(true);
-        triggerHaptic();
-        console.log(
-          `Opened download overlay for latest episode - TV show ID: ${tvShow.id}, Season: ${latestEpisode.season_number}, Episode: ${latestEpisode.episode_number}`
-        );
       } else {
-        console.warn('No latest episode found for download; setting default Season 1, Episode 1');
         setSelectedSeasonNumber(1);
         setSelectedEpisodeNumber(1);
-        setShowDownloadOverlay(true);
-        triggerHaptic();
       }
+      setShowDownloadOverlay(true);
+      triggerHaptic();
     } catch (err) {
       console.error('Error opening download overlay for latest episode:', err);
       addToast('Failed to open download overlay.', true);
     }
   }, [tvShow, episodes, isTVShowValid, triggerHaptic, addToast]);
 
-  // Handle Download for specific episode
   const handleOpenDownload = useCallback(() => {
     if (!isTVShowValid || !selectedSeasonNumber || !selectedEpisodeNumber) {
-      console.warn('Invalid TV show, season, or episode for download');
       addToast('Please select a valid season and episode.', true);
       return;
     }
-
     setShowDownloadOverlay(true);
     triggerHaptic();
-    console.log(
-      `Opened download overlay for TV show ID: ${tvShow.id}, Season: ${selectedSeasonNumber}, Episode: ${selectedEpisodeNumber}`
-    );
   }, [tvShow, selectedSeasonNumber, selectedEpisodeNumber, isTVShowValid, triggerHaptic, addToast]);
 
-  // Handle Close Download Overlay
   const handleCloseDownload = useCallback(() => {
     setShowDownloadOverlay(false);
     setSelectedSeasonNumber(null);
     setSelectedEpisodeNumber(null);
     triggerHaptic();
-    console.log('Closed download overlay and reset season/episode');
   }, [triggerHaptic]);
 
-  // Handle Play Episode in Download Overlay
   const handlePlayEpisodeInOverlay = useCallback(() => {
     if (!isTVShowValid || !selectedSeasonNumber || !selectedEpisodeNumber) {
-      console.warn('Invalid TV show, season, or episode for playback');
       addToast('Please select a valid season and episode.', true);
       return;
     }
-
     handlePlayEpisode(selectedSeasonNumber, selectedEpisodeNumber);
-    console.log(
-      `Playing TV show ${tvShow.id}, Season: ${selectedSeasonNumber}, Episode: ${selectedEpisodeNumber}`
-    );
   }, [tvShow, selectedSeasonNumber, selectedEpisodeNumber, isTVShowValid, handlePlayEpisode, addToast]);
 
-  // TV Show Header Component (Inline)
+  // ================================================================================================
+  // Inline Components
+  // ================================================================================================
+
+  /** Renders the main header section with backdrop, poster, and action buttons. */
   const TVShowHeader = ({
     tvShow,
     isFavorite,
@@ -402,21 +396,15 @@ const TVShowDetailsPage = () => {
     onPlayEpisode,
     lastWatchedEpisode,
     onShare,
-    onDownload,
     onDownloadLatestEpisode,
   }: TVShowHeaderProps) => {
     const handlePlayLastWatched = useCallback(() => {
       try {
         if (lastWatchedEpisode) {
           onPlayEpisode(lastWatchedEpisode.season_number, lastWatchedEpisode.episode_number);
-          console.log(
-            `Playing last watched episode - Season: ${lastWatchedEpisode.season_number}, Episode: ${lastWatchedEpisode.episode_number}`
-          );
         } else if (tvShow.seasons.length > 0) {
           onPlayEpisode(tvShow.seasons[0].season_number, 1);
-          console.log(`Playing first episode - Season: ${tvShow.seasons[0].season_number}, Episode: 1`);
         } else {
-          console.warn('No seasons available for playback');
           addToast('No episodes available to play.', true);
         }
       } catch (err) {
@@ -427,41 +415,28 @@ const TVShowDetailsPage = () => {
 
     return (
       <div className="relative w-full h-[70vh]">
-        {/* Backdrop Image */}
         <img
           src={getImageUrl(tvShow.backdrop_path, 'original')}
           alt={tvShow.name || 'TV Show backdrop'}
           className="w-full h-full object-cover"
-          onError={() => {
-            console.error('Failed to load backdrop image');
-            addToast('Failed to load backdrop image.', true);
-          }}
         />
         <div className="absolute inset-0 details-gradient" />
         <div className="absolute bottom-0 left-0 right-0 p-6 md:p-12 lg:p-16">
           <div className="flex flex-col md:flex-row items-start gap-6 max-w-6xl mx-auto">
-            {/* Poster Image (Desktop Only) */}
             <div className="hidden md:block flex-shrink-0 w-48 xl:w-64 rounded-lg overflow-hidden shadow-lg">
               <img
                 src={getImageUrl(tvShow.poster_path, 'w342')}
                 alt={tvShow.name || 'TV Show poster'}
                 className="w-full h-auto"
-                onError={() => {
-                  console.error('Failed to load poster image');
-                  addToast('Failed to load poster image.', true);
-                }}
               />
             </div>
             <div className="flex-1">
-              {/* Title */}
               <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 text-balance">
                 {tvShow.name}
               </h1>
-              {/* Tagline */}
               {tvShow.tagline && (
                 <p className="text-white/70 mb-4 italic text-lg">{tvShow.tagline}</p>
               )}
-              {/* Metadata */}
               <div className="flex flex-wrap items-center gap-4 mb-6">
                 {tvShow.first_air_date && (
                   <div className="flex items-center text-white/80">
@@ -484,9 +459,7 @@ const TVShowDetailsPage = () => {
                   ))}
                 </div>
               </div>
-              {/* Overview */}
               <p className="text-white/80 mb-6">{tvShow.overview}</p>
-              {/* Action Buttons */}
               <div className="flex flex-wrap gap-3">
                 <Button
                   onClick={handlePlayLastWatched}
@@ -533,7 +506,7 @@ const TVShowDetailsPage = () => {
     );
   };
 
-  // Episodes Component (Inline)
+  /** Renders the list of seasons and episodes for the selected season. */
   const TVShowEpisodes = ({
     seasons,
     episodes,
@@ -550,39 +523,22 @@ const TVShowDetailsPage = () => {
             ? prev.filter((num) => num !== episodeNumber)
             : [...prev, episodeNumber]
         );
-        console.log(`Toggled episode ${episodeNumber} description`);
       } catch (err) {
         console.error('Error toggling episode description:', err);
-        addToast('Failed to toggle episode description.', true);
       }
-    }, [addToast, triggerHaptic]);
+    }, [triggerHaptic]);
 
     if (!episodes || episodes.length === 0) {
-      console.warn('No episodes available for rendering');
-      return (
-        <div className="text-white text-center">
-          No episodes available for this season.
-        </div>
-      );
+      return <div className="text-white text-center">No episodes available for this season.</div>;
     }
 
     return (
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-white mb-6">Seasons & Episodes</h2>
-        {/* Season Selector */}
         <div className="mb-4">
           <select
             value={selectedSeason}
-            onChange={(e) => {
-              try {
-                const seasonNum = parseInt(e.target.value, 10);
-                onSeasonChange(seasonNum);
-                console.log(`Selected season: ${seasonNum}`);
-              } catch (err) {
-                console.error('Error selecting season:', err);
-                addToast('Failed to select season.', true);
-              }
-            }}
+            onChange={(e) => onSeasonChange(parseInt(e.target.value, 10))}
             className="bg-background border border-white/20 text-white rounded px-3 py-2"
           >
             {seasons.map((season: Season) => (
@@ -592,7 +548,6 @@ const TVShowDetailsPage = () => {
             ))}
           </select>
         </div>
-        {/* Episode List */}
         <div className="space-y-4">
           {episodes
             .filter((ep: Episode) => ep.season_number === selectedSeason)
@@ -602,16 +557,11 @@ const TVShowDetailsPage = () => {
                 className="bg-background border border-white/10 rounded-lg p-4"
               >
                 <div className="flex items-center gap-4">
-                  {/* Episode Thumbnail */}
                   {episode.still_path ? (
                     <img
                       src={getImageUrl(episode.still_path, 'w300')}
                       alt={`Episode ${episode.episode_number}`}
                       className="w-32 h-18 object-cover rounded"
-                      onError={() => {
-                        console.error(`Failed to load image for Episode ${episode.episode_number}`);
-                        addToast('Failed to load episode image.', true);
-                      }}
                     />
                   ) : (
                     <div className="w-32 h-18 bg-white/10 rounded flex items-center justify-center">
@@ -637,36 +587,14 @@ const TVShowDetailsPage = () => {
                     </p>
                     <div className="flex gap-2 mt-2">
                       <Button
-                        onClick={() => {
-                          try {
-                            onPlayEpisode(episode.season_number, episode.episode_number);
-                            triggerHaptic();
-                            console.log(
-                              `Playing episode S${episode.season_number}E${episode.episode_number}`
-                            );
-                          } catch (err) {
-                            console.error('Error playing episode:', err);
-                            addToast('Failed to play episode.', true);
-                          }
-                        }}
+                        onClick={() => onPlayEpisode(episode.season_number, episode.episode_number)}
                         className="bg-accent hover:bg-accent/80 text-white flex items-center"
                       >
                         <Play className="h-4 w-4 mr-2" />
                         Play Episode
                       </Button>
                       <Button
-                        onClick={() => {
-                          try {
-                            onDownloadEpisode(episode.season_number, episode.episode_number);
-                            triggerHaptic();
-                            console.log(
-                              `Downloading episode S${episode.season_number}E${episode.episode_number}`
-                            );
-                          } catch (err) {
-                            console.error('Error initiating download:', err);
-                            addToast('Failed to initiate download.', true);
-                          }
-                        }}
+                        onClick={() => onDownloadEpisode(episode.season_number, episode.episode_number)}
                         className="bg-accent hover:bg-accent/80 text-white flex items-center"
                       >
                         <Download className="h-4 w-4 mr-2" />
@@ -687,91 +615,75 @@ const TVShowDetailsPage = () => {
     );
   };
 
-  // About Component (Inline)
-  const TVShowAbout = ({ tvShow }: AboutProps) => {
-    return (
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-white mb-6">About {tvShow.name}</h2>
-        <p className="text-white/80 mb-4">{tvShow.overview}</p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <h3 className="text-lg font-semibold text-white mb-2">Details</h3>
-            <p className="text-white/80">
-              <strong>First Air Date:</strong>{' '}
-              {tvShow.first_air_date
-                ? new Date(tvShow.first_air_date).toLocaleDateString()
-                : 'N/A'}
-            </p>
-            <p className="text-white/80">
-              <strong>Status:</strong> {tvShow.status || 'N/A'}
-            </p>
-            <p className="text-white/80">
-              <strong>Number of Seasons:</strong> {tvShow.number_of_seasons || 'N/A'}
-            </p>
-            <p className="text-white/80">
-              <strong>Number of Episodes:</strong> {tvShow.number_of_episodes || 'N/A'}
-            </p>
-          </div>
-          <div>
-            <h3 className="text-lg font-semibold text-white mb-2">Genres</h3>
-            <div className="flex flex-wrap gap-2">
-              {tvShow.genres.map((genre) => (
-                <span
-                  key={genre.id}
-                  className="px-2 py-1 rounded bg-white/10 text-white/80 text-xs"
-                >
-                  {genre.name}
-                </span>
-              ))}
-            </div>
+  /** Renders detailed information about the TV show. */
+  const TVShowAbout = ({ tvShow }: AboutProps) => (
+    <div className="mb-8">
+      <h2 className="text-2xl font-bold text-white mb-6">About {tvShow.name}</h2>
+      <p className="text-white/80 mb-4">{tvShow.overview}</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <h3 className="text-lg font-semibold text-white mb-2">Details</h3>
+          <p className="text-white/80">
+            <strong>First Air Date:</strong>{' '}
+            {tvShow.first_air_date ? new Date(tvShow.first_air_date).toLocaleDateString() : 'N/A'}
+          </p>
+          <p className="text-white/80">
+            <strong>Status:</strong> {tvShow.status || 'N/A'}
+          </p>
+          <p className="text-white/80">
+            <strong>Number of Seasons:</strong> {tvShow.number_of_seasons || 'N/A'}
+          </p>
+          <p className="text-white/80">
+            <strong>Number of Episodes:</strong> {tvShow.number_of_episodes || 'N/A'}
+          </p>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-white mb-2">Genres</h3>
+          <div className="flex flex-wrap gap-2">
+            {tvShow.genres.map((genre) => (
+              <span
+                key={genre.id}
+                className="px-2 py-1 rounded bg-white/10 text-white/80 text-xs"
+              >
+                {genre.name}
+              </span>
+            ))}
           </div>
         </div>
       </div>
-    );
-  };
+    </div>
+  );
 
-  // Cast Component (Inline)
-  const TVShowCast = ({ cast }: CastProps) => {
-    return (
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-white mb-6">Cast</h2>
-        {cast.length === 0 ? (
-          <p className="text-white/80">No cast information available.</p>
-        ) : (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {cast.map((actor) => (
-              <div key={actor.id} className="text-white/80">
-                <p className="font-medium">{actor.name}</p>
-                <p className="text-sm">as {actor.character || 'N/A'}</p>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
+  /** Renders the list of cast members. */
+  const TVShowCast = ({ cast }: CastProps) => (
+    <div className="mb-8">
+      <h2 className="text-2xl font-bold text-white mb-6">Cast</h2>
+      {cast.length === 0 ? (
+        <p className="text-white/80">No cast information available.</p>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {cast.map((actor) => (
+            <div key={actor.id} className="text-white/80">
+              <p className="font-medium">{actor.name}</p>
+              <p className="text-sm">as {actor.character || 'N/A'}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 
-  // Download Section Component (Inline)
+  /** Renders a dedicated section for downloading episodes. */
   const TVDownloadSection = ({ tvShowName, seasons, episodesBySeason }: DownloadSectionProps) => {
     const [selectedDownloadSeason, setSelectedDownloadSeason] = useState<number>(seasons[0]?.season_number || 1);
 
     return (
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-white mb-6">Download Episodes for {tvShowName}</h2>
-        {/* Season Selector */}
         <div className="mb-4">
           <select
             value={selectedDownloadSeason}
-            onChange={(e) => {
-              try {
-                const seasonNum = parseInt(e.target.value, 10);
-                setSelectedDownloadSeason(seasonNum);
-                console.log(`Selected download season: ${seasonNum}`);
-              } catch (err) {
-                console.error('Error selecting download season:', err);
-                addToast('Failed to select season.', true);
-              }
-            }}
+            onChange={(e) => setSelectedDownloadSeason(parseInt(e.target.value, 10))}
             className="bg-background border border-white/20 text-white rounded px-3 py-2"
           >
             {seasons.map((season: Season) => (
@@ -781,7 +693,6 @@ const TVShowDetailsPage = () => {
             ))}
           </select>
         </div>
-        {/* Episode List for Download */}
         <div className="space-y-4">
           {(episodesBySeason[selectedDownloadSeason] || []).length === 0 ? (
             <p className="text-white/80">No episodes available for this season.</p>
@@ -801,18 +712,10 @@ const TVShowDetailsPage = () => {
                 </div>
                 <Button
                   onClick={() => {
-                    try {
-                      setSelectedSeasonNumber(episode.season_number);
-                      setSelectedEpisodeNumber(episode.episode_number);
-                      setShowDownloadOverlay(true);
-                      triggerHaptic();
-                      console.log(
-                        `Opened download overlay for S${episode.season_number}E${episode.episode_number}`
-                      );
-                    } catch (err) {
-                      console.error('Error initiating download:', err);
-                      addToast('Failed to initiate download.', true);
-                    }
+                    setSelectedSeasonNumber(episode.season_number);
+                    setSelectedEpisodeNumber(episode.episode_number);
+                    setShowDownloadOverlay(true);
+                    triggerHaptic();
                   }}
                   className="bg-accent hover:bg-accent/80 text-white flex items-center"
                 >
@@ -827,46 +730,38 @@ const TVShowDetailsPage = () => {
     );
   };
 
-  // Helper Function: Render loading state
+  // ================================================================================================
+  // Conditional Render Functions
+  // ================================================================================================
+
+  /** Renders a loading indicator. */
   const renderLoadingState = () => (
     <div className="flex items-center justify-center min-h-screen bg-background">
       <div className="animate-pulse-slow text-white font-medium">Loading TV show details...</div>
     </div>
   );
 
-  // Helper Function: Render error state
+  /** Renders an error message with a button to go home. */
   const renderErrorState = () => (
     <div className="flex flex-col items-center justify-center min-h-screen bg-background">
       <h1 className="text-2xl text-white mb-4">Error: {error || 'Failed to load TV show data'}</h1>
-      <Button
-        onClick={() => {
-          navigate('/');
-          console.log('Navigated to home due to error');
-        }}
-        variant="outline"
-      >
+      <Button onClick={() => navigate('/')} variant="outline">
         Return to Home
       </Button>
     </div>
   );
 
-  // Helper Function: Render not found state
+  /** Renders a "not found" message. */
   const renderNotFoundState = () => (
     <div className="flex flex-col items-center justify-center min-h-screen bg-background">
       <h1 className="text-2xl text-white mb-4">TV Show not found</h1>
-      <Button
-        onClick={() => {
-          navigate('/');
-          console.log('Navigated to home: TV show not found');
-        }}
-        variant="outline"
-      >
+      <Button onClick={() => navigate('/')} variant="outline">
         Return to Home
       </Button>
     </div>
   );
 
-  // Helper Function: Render toast notifications
+  /** Renders the list of active toast notifications. */
   const renderToasts = () => (
     <div className="fixed top-5 left-1/2 transform -translate-x-1/2 z-[1000] space-y-2">
       {toasts.map((toast) => (
@@ -882,14 +777,10 @@ const TVShowDetailsPage = () => {
     </div>
   );
 
-  // Helper Function: Render back button
+  /** Renders a back button. */
   const renderBackButton = () => (
     <button
-      onClick={() => {
-        navigate(-1);
-        triggerHaptic();
-        console.log('Navigated back from TVShowDetailsPage');
-      }}
+      onClick={() => navigate(-1)}
       className="absolute top-20 left-6 z-10 text-white p-2 rounded-full bg-black/30 hover:bg-black/50 transition-colors"
       aria-label="Go back"
     >
@@ -897,7 +788,7 @@ const TVShowDetailsPage = () => {
     </button>
   );
 
-  // Helper Function: Render trailer background
+  /** Renders the trailer as a background video (desktop only). */
   const renderTrailerBackground = () => {
     if (isMobile || !trailerKey) return null;
     return (
@@ -908,32 +799,20 @@ const TVShowDetailsPage = () => {
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           allowFullScreen
           title="TV Show Trailer"
-          onLoad={() => console.log('Trailer iframe loaded')}
-          onError={() => {
-            console.error('Failed to load trailer iframe');
-            addToast('Failed to load trailer.', true);
-          }}
         />
       </div>
     );
   };
 
-  // Helper Function: Render download overlay
+  /** Renders the download selection overlay. */
   const renderDownloadOverlay = () => {
     if (!showDownloadOverlay || !isTVShowValid || !selectedSeasonNumber || !selectedEpisodeNumber) {
-      console.log('Download overlay not rendered: Invalid state', {
-        showDownloadOverlay,
-        isTVShowValid,
-        selectedSeasonNumber,
-        selectedEpisodeNumber,
-      });
       return null;
     }
 
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
         <div className="relative bg-background rounded-lg shadow-xl w-full max-w-4xl p-6">
-          {/* Close Button */}
           <button
             onClick={handleCloseDownload}
             className="absolute top-4 right-4 text-white p-2 rounded-full bg-black/50 hover:bg-black/70 transition-colors"
@@ -944,27 +823,17 @@ const TVShowDetailsPage = () => {
             </svg>
           </button>
 
-          {/* Security Message */}
           <p className="text-white text-center mb-4">
             Please solve this due to security requirements
           </p>
-
-          {/* Season and Episode Selectors */}
           <div className="flex flex-wrap gap-4 mb-4">
             <select
               value={selectedSeasonNumber}
               onChange={(e) => {
-                try {
-                  const seasonNum = parseInt(e.target.value, 10);
-                  setSelectedSeasonNumber(seasonNum);
-                  const seasonEpisodes = episodes.filter((ep: Episode) => ep.season_number === seasonNum);
-                  const firstEpisode = seasonEpisodes[0]?.episode_number || 1;
-                  setSelectedEpisodeNumber(firstEpisode);
-                  console.log(`Selected Season: ${seasonNum}, Episode: ${firstEpisode}`);
-                } catch (err) {
-                  console.error('Error selecting season:', err);
-                  addToast('Failed to select season.', true);
-                }
+                const seasonNum = parseInt(e.target.value, 10);
+                setSelectedSeasonNumber(seasonNum);
+                const firstEpisode = episodes.find((ep: Episode) => ep.season_number === seasonNum)?.episode_number || 1;
+                setSelectedEpisodeNumber(firstEpisode);
               }}
               className="bg-background border border-white/20 text-white rounded px-3 py-2"
             >
@@ -976,16 +845,7 @@ const TVShowDetailsPage = () => {
             </select>
             <select
               value={selectedEpisodeNumber}
-              onChange={(e) => {
-                try {
-                  const epNum = parseInt(e.target.value, 10);
-                  setSelectedEpisodeNumber(epNum);
-                  console.log(`Selected Episode: ${epNum}`);
-                } catch (err) {
-                  console.error('Error selecting episode:', err);
-                  addToast('Failed to select episode.', true);
-                }
-              }}
+              onChange={(e) => setSelectedEpisodeNumber(parseInt(e.target.value, 10))}
               className="bg-background border border-white/20 text-white rounded px-3 py-2"
             >
               {episodes
@@ -1013,29 +873,18 @@ const TVShowDetailsPage = () => {
               </Button>
             </div>
           </div>
-
-          {/* Download Iframe */}
           <iframe
             className="w-full h-[60vh] rounded-lg border-2 border-white/10"
             src={`https://dl.vidsrc.vip/tv/${tvShow.id}/${selectedSeasonNumber}/${selectedEpisodeNumber}`}
             allowFullScreen
             title={`Download TV Show - Season ${selectedSeasonNumber}, Episode ${selectedEpisodeNumber}`}
-            onLoad={() =>
-              console.log(
-                `Download iframe loaded for TV show ID: ${tvShow.id}, Season: ${selectedSeasonNumber}, Episode: ${selectedEpisodeNumber}`
-              )
-            }
-            onError={() => {
-              console.error('Failed to load download iframe');
-              addToast('Failed to load download content.', true);
-            }}
           />
         </div>
       </div>
     );
   };
 
-  // Helper Function: Render tabs navigation
+  /** Renders the main content tabs navigation. */
   const renderTabsNavigation = () => (
     <div className="flex border-b border-white/10 mb-6 overflow-x-auto pb-1 hide-scrollbar">
       {[
@@ -1056,7 +905,6 @@ const TVShowDetailsPage = () => {
           onClick={() => {
             triggerHaptic();
             setActiveTab(tab.id as TabType);
-            console.log(`Switched to ${tab.label} tab`);
           }}
         >
           {tab.label}
@@ -1065,10 +913,9 @@ const TVShowDetailsPage = () => {
     </div>
   );
 
-  // Helper Function: Render tab content
+  /** Renders the content for the currently active tab. */
   const renderTabContent = () => {
     if (!isTVShowValid) {
-      console.warn('Cannot render tab content: Invalid TV show data');
       return <div className="text-white/80">No TV show data available.</div>;
     }
 
@@ -1086,9 +933,6 @@ const TVShowDetailsPage = () => {
               setSelectedEpisodeNumber(episodeNumber);
               setShowDownloadOverlay(true);
               triggerHaptic();
-              console.log(
-                `Opened download overlay for TV show ID: ${tvShow.id}, Season: ${seasonNumber}, Episode: ${episodeNumber}`
-              );
             }}
           />
         );
@@ -1123,20 +967,15 @@ const TVShowDetailsPage = () => {
     }
   };
 
-  // Main Render
+  // --- Main Render Logic ---
   if (isLoading) return renderLoadingState();
   if (error) return renderErrorState();
   if (!tvShow) return renderNotFoundState();
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Navbar */}
       <Navbar />
-
-      {/* Toast Notifications */}
       {renderToasts()}
-
-      {/* Header Section */}
       <div className="relative">
         {renderBackButton()}
         {renderTrailerBackground()}
@@ -1153,40 +992,25 @@ const TVShowDetailsPage = () => {
           onDownloadLatestEpisode={handleDownloadLatestEpisode}
         />
       </div>
-
-      {/* Download Overlay */}
       {renderDownloadOverlay()}
 
-      {/* Main Content */}
       <div className="max-w-6xl mx-auto px-4 py-8">
         {renderTabsNavigation()}
         {renderTabContent()}
       </div>
 
-      {/* Recommendations */}
       {recommendations.length > 0 && (
         <ContentRow
           title="More Like This"
           media={recommendations}
-          onItemClick={(mediaId: number) => {
-            try {
-              navigate(`/tv/${mediaId}`);
-              console.log(`Navigated to TV show ${mediaId}`);
-            } catch (err) {
-              console.error('Error navigating to recommendation:', err);
-              addToast('Failed to load recommendation.', true);
-            }
-          }}
+          onItemClick={(mediaId: number) => navigate(`/tv/${mediaId}`)}
         />
       )}
 
-      {/* Commento Section */}
       <div className="max-w-6xl mx-auto px-4 py-8">
         <h3 className="text-xl font-semibold text-white mb-4">Comments</h3>
         {commentoError ? (
-          <p className="text-red-600">
-            {commentoError} Open DevTools (F12), check Console and Network tabs, and verify Commento script load.
-          </p>
+          <p className="text-red-600">{commentoError}</p>
         ) : (
           <div id="commento" data-page-id={`tv-${tvShow.id}`}></div>
         )}
