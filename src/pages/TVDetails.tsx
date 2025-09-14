@@ -212,7 +212,7 @@ const TVShowDetailsPage = () => {
     }
   }, [tvShow, episodes, getLastWatchedEpisode, isTVShowValid, isEpisodesValid, addToast]);
 
-  // Initialize Commento - Dynamic Script Loading
+  // Initialize Commento - Dynamic Script Loading with Delay
   useEffect(() => {
     if (!tvShow?.id) {
       console.warn('No TV show ID for Commento initialization');
@@ -228,37 +228,48 @@ const TVShowDetailsPage = () => {
     script.src = 'https://cdn.commento.io/js/commento.js';
     script.defer = true;
     script.async = true;
+    script.setAttribute('type', 'module'); // Ensure script is treated as a module
     script.onload = () => {
       console.log('Commento script loaded successfully');
-      const commentoDiv = document.getElementById('commento');
-      if (commentoDiv) {
-        commentoDiv.setAttribute('data-page-id', pageId);
-        console.log(`Commento div found, set data-page-id: ${pageId}`);
-        if (window.commento && typeof window.commento.main === 'function') {
-          window.commento.main();
-          console.log('Commento initialized via window.commento.main()');
-          setTimeout(() => {
-            const widget = document.querySelector('#commento .commento-card');
-            if (!widget) {
-              console.error('Commento widget not rendered');
+      // Delay to ensure DOM is ready
+      setTimeout(() => {
+        const commentoDiv = document.getElementById('commento');
+        if (commentoDiv) {
+          commentoDiv.setAttribute('data-page-id', pageId);
+          console.log(`Commento div found, set data-page-id: ${pageId}`);
+          if (window.commento && typeof window.commento.main === 'function') {
+            try {
+              window.commento.main();
+              console.log('Commento initialized via window.commento.main()');
+              setTimeout(() => {
+                const widget = document.querySelector('#commento .commento-card');
+                if (!widget) {
+                  console.error('Commento widget not rendered');
+                  setCommentoError(
+                    'Failed to load comments: Widget not rendered. Please refresh the page or contact Commento support.'
+                  );
+                } else {
+                  console.log('Commento widget successfully rendered');
+                  setCommentoError(null);
+                }
+              }, 1000);
+            } catch (err) {
+              console.error('Error calling window.commento.main():', err);
               setCommentoError(
-                'Failed to load comments: Widget not rendered. Please refresh the page or contact Commento support.'
+                'Failed to load comments: Commento initialization failed. Check console for details or contact Commento support.'
               );
-            } else {
-              console.log('Commento widget successfully rendered');
-              setCommentoError(null);
             }
-          }, 1000);
+          } else {
+            console.error('window.commento.main is not a function');
+            setCommentoError(
+              'Failed to load comments: Commento initialization failed. Check console for details or contact Commento support.'
+            );
+          }
         } else {
-          console.error('window.commento.main is not a function');
-          setCommentoError(
-            'Failed to load comments: Commento initialization failed. Check console for details or contact Commento support.'
-          );
+          console.error('Commento div not found');
+          setCommentoError('Failed to load comments: Comment container not found. Please refresh the page.');
         }
-      } else {
-        console.error('Commento div not found');
-        setCommentoError('Failed to load comments: Comment container not found. Please refresh the page.');
-      }
+      }, 500); // 500ms delay to ensure DOM rendering
     };
     script.onerror = () => {
       console.error('Failed to load Commento script');
@@ -826,7 +837,7 @@ const TVShowDetailsPage = () => {
   // Helper Function: Render error state
   const renderErrorState = () => (
     <div className="flex flex-col items-center justify-center min-h-screen bg-background">
-      <h1 className="text-2xl text-white mb-4">Error: {error}</h1>
+      <h1 className="text-2xl text-white mb-4">Error: {error || 'Failed to load TV show data'}</h1>
       <Button
         onClick={() => {
           navigate('/');
@@ -1032,7 +1043,7 @@ const TVShowDetailsPage = () => {
         { id: 'about', label: 'About' },
         { id: 'cast', label: 'Cast' },
         { id: 'reviews', label: 'Reviews' },
-        { id: 'downloads', label: 'Downloads' },
+        { id: 'downloads', label: 'Downloads', hide: !user },
       ].map((tab) => (
         <button
           key={tab.id}
@@ -1041,6 +1052,7 @@ const TVShowDetailsPage = () => {
               ? 'text-white border-b-2 border-accent'
               : 'text-white/60 hover:text-white'
           }`}
+          style={{ display: tab.hide ? 'none' : undefined }}
           onClick={() => {
             triggerHaptic();
             setActiveTab(tab.id as TabType);
@@ -1055,6 +1067,11 @@ const TVShowDetailsPage = () => {
 
   // Helper Function: Render tab content
   const renderTabContent = () => {
+    if (!isTVShowValid) {
+      console.warn('Cannot render tab content: Invalid TV show data');
+      return <div className="text-white/80">No TV show data available.</div>;
+    }
+
     switch (activeTab) {
       case 'episodes':
         return (
@@ -1164,18 +1181,16 @@ const TVShowDetailsPage = () => {
       )}
 
       {/* Commento Section */}
-      {tvShow && (
-        <div className="max-w-6xl mx-auto px-4 py-8">
-          <h3 className="text-xl font-semibold text-white mb-4">Comments</h3>
-          {commentoError ? (
-            <p className="text-red-600">
-              {commentoError} Open DevTools (F12), check Console and Network tabs, and verify Commento script load.
-            </p>
-          ) : (
-            <div id="commento" data-page-id={`tv-${tvShow.id}`}></div>
-          )}
-        </div>
-      )}
+      <div className="max-w-6xl mx-auto px-4 py-8">
+        <h3 className="text-xl font-semibold text-white mb-4">Comments</h3>
+        {commentoError ? (
+          <p className="text-red-600">
+            {commentoError} Open DevTools (F12), check Console and Network tabs, and verify Commento script load.
+          </p>
+        ) : (
+          <div id="commento" data-page-id={`tv-${tvShow.id}`}></div>
+        )}
+      </div>
     </div>
   );
 };
