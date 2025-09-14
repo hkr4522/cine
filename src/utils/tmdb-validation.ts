@@ -1,9 +1,6 @@
 import { Media } from '@/utils/types';
 import env from '@/config/env';
 
-// Centralized base URL for all TMDB API calls via your proxy
-const TMDB_BASE_URL = "https://flickystream.co/proxy/?url=https://api.themoviedb.org/3";
-
 interface TMDBValidationResult {
   isValid: boolean;
   mediaType: 'movie' | 'tv' | null;
@@ -19,7 +16,7 @@ async function validateTMDBContent(mediaId: number, expectedType?: 'movie' | 'tv
     // First try the expected type if provided
     if (expectedType) {
       const response = await fetch(
-        `${TMDB_BASE_URL}/${expectedType}/${mediaId}?api_key=${env.TMDB_API_KEY}`
+        `https://flickystream.co/proxy/?url=api.themoviedb.org/3/${expectedType}/${mediaId}?api_key=${env.TMDB_API_KEY}`
       );
       
       if (response.ok) {
@@ -33,7 +30,7 @@ async function validateTMDBContent(mediaId: number, expectedType?: 'movie' | 'tv
 
     // If no type provided or expected type failed, try both types
     const movieResponse = await fetch(
-      `${TMDB_BASE_URL}/movie/${mediaId}?api_key=${env.TMDB_API_KEY}`
+      `https://flickystream.co/proxy/?url=api.themoviedb.org/3/movie/${mediaId}?api_key=${env.TMDB_API_KEY}`
     );
 
     if (movieResponse.ok) {
@@ -45,7 +42,7 @@ async function validateTMDBContent(mediaId: number, expectedType?: 'movie' | 'tv
     }
 
     const tvResponse = await fetch(
-      `${TMDB_BASE_URL}/tv/${mediaId}?api_key=${env.TMDB_API_KEY}`
+      `https://flickystream.co/proxy/?url=api.themoviedb.org/3/tv/${mediaId}?api_key=${env.TMDB_API_KEY}`
     );
 
     if (tvResponse.ok) {
@@ -133,4 +130,3 @@ export {
   navigateToContent,
   type TMDBValidationResult
 };
-
