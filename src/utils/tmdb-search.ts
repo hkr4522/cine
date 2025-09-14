@@ -1,9 +1,6 @@
 import { Media } from '@/utils/types';
 import env from '@/config/env';
 
-// Centralized base URL for all TMDB API calls via your proxy
-const TMDB_BASE_URL = "https://flickystream.co/proxy/?url=https://api.themoviedb.org/3";
-
 interface TMDBSearchResult {
   id: number;
   title?: string;
@@ -33,9 +30,8 @@ interface TMDBValidatedContent {
 async function searchAndValidateTMDB(media: Media): Promise<TMDBValidatedContent | null> {
   try {
     const query = encodeURIComponent(media.title || media.name || '');
-    // Using the centralized TMDB_BASE_URL
     const searchResponse = await fetch(
-      `${TMDB_BASE_URL}/search/multi?api_key=${env.TMDB_API_KEY}&query=${query}`
+      `https://flickystream.co/proxy/?url=api.themoviedb.org/3/search/multi?api_key=${env.TMDB_API_KEY}&query=${query}`
     );
 
     if (!searchResponse.ok) {
@@ -77,9 +73,8 @@ async function searchAndValidateTMDB(media: Media): Promise<TMDBValidatedContent
       const fallbackQuery = encodeURIComponent(
         (media.title || media.name || '').split('(')[0].trim()
       );
-      // Using the centralized TMDB_BASE_URL
       const fallbackResponse = await fetch(
-        `${TMDB_BASE_URL}/search/multi?api_key=${env.TMDB_API_KEY}&query=${fallbackQuery}`
+        `https://flickystream.co/proxy/?url=api.themoviedb.org/3/search/multi?api_key=${env.TMDB_API_KEY}&query=${fallbackQuery}`
       );
       
       if (!fallbackResponse.ok) {
@@ -226,9 +221,8 @@ async function getValidatedRoute(
       if (validatedContent.mediaType === 'tv') {
         try {
           // Verify season exists
-          // Using the centralized TMDB_BASE_URL
           const seasonData = await fetch(
-            `${TMDB_BASE_URL}/tv/${validatedContent.tmdbId}/season/${episodeInfo?.seasonNumber || 1}?api_key=${env.TMDB_API_KEY}`
+            `https://flickystream.co/proxy/?url=api.themoviedb.org/3/tv/${validatedContent.tmdbId}/season/${episodeInfo?.seasonNumber || 1}?api_key=${env.TMDB_API_KEY}`
           );
 
           if (!seasonData.ok) {
@@ -299,4 +293,3 @@ export {
   type TMDBSearchResult,
   type TMDBEpisodeInfo
 };
-
