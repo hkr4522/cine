@@ -215,7 +215,7 @@ const TVShowDetailsPage = () => {
     }
   }, [tvShow, episodes, getLastWatchedEpisode, isTVShowValid, isEpisodesValid, addToast]);
 
-  // Initialize Commento Script
+  // Initialize Commento Script with Retry Mechanism
   useEffect(() => {
     if (!tvShow?.id) {
       console.warn('No TV show ID for Commento initialization');
@@ -235,25 +235,41 @@ const TVShowDetailsPage = () => {
         script.async = true;
         script.onload = () => {
           console.log('Commento script loaded successfully');
-          const commentoDiv = document.getElementById('commento');
-          if (commentoDiv) {
-            commentoDiv.setAttribute('data-page-id', pageId);
-            console.log(`Commento initialized with data-page-id: ${pageId}`);
-            // Check if Commento widget is initialized
-            setTimeout(() => {
-              if (!window.commento) {
-                console.error('Commento widget not initialized');
-                setCommentoError('Failed to initialize comments. Please try again later.');
-              }
-            }, 5000); // Wait 5 seconds to check initialization
-          } else {
-            console.error('Commento div not found');
-            setCommentoError('Failed to initialize comments: Container not found.');
-          }
+          // Retry mechanism to ensure container exists
+          let retryCount = 0;
+          const maxRetries = 5;
+          const retryInterval = 1000; // 1 second
+
+          const initializeCommento = () => {
+            const commentoDiv = document.getElementById('commento');
+            if (commentoDiv) {
+              commentoDiv.setAttribute('data-page-id', pageId);
+              console.log(`Commento initialized with data-page-id: ${pageId}`);
+              // Check if Commento widget is initialized
+              setTimeout(() => {
+                if (!window.commento) {
+                  console.error('Commento widget not initialized');
+                  setCommentoError('Failed to initialize comments. Please refresh the page.');
+                } else {
+                  console.log('Commento widget initialized successfully');
+                  setCommentoError(null);
+                }
+              }, 2000); // Reduced timeout to 2 seconds for faster feedback
+            } else if (retryCount < maxRetries) {
+              console.warn(`Commento container not found, retrying (${retryCount + 1}/${maxRetries})`);
+              retryCount++;
+              setTimeout(initializeCommento, retryInterval);
+            } else {
+              console.error('Commento container not found after max retries');
+              setCommentoError('Failed to load comments: Comment container not found. Please refresh the page.');
+            }
+          };
+
+          initializeCommento();
         };
         script.onerror = () => {
           console.error('Failed to load Commento script');
-          setCommentoError('Failed to load comments system.');
+          setCommentoError('Failed to load comments system. Please check your network connection.');
         };
 
         document.head.appendChild(script);
@@ -269,7 +285,7 @@ const TVShowDetailsPage = () => {
       };
     } catch (err) {
       console.error('Error initializing Commento:', err);
-      setCommentoError('Error loading comments system.');
+      setCommentoError('Error loading comments system. Please try again later.');
     }
   }, [tvShow?.id]);
 
@@ -1112,6 +1128,9 @@ const TVShowDetailsPage = () => {
 
       {/* Toast Notifications */}
       {renderToasts()}
+
+      {/* Commento Container (Rendered Early) */}
+      <div id="commento" data-page-id={tvShow ? `tv-${tvShow.id}` : ''} style={{ display: 'none' }}></div>
 
       {/* Header Section */}
       <div className="relative">
