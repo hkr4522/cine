@@ -16,7 +16,7 @@ async function validateTMDBContent(mediaId: number, expectedType?: 'movie' | 'tv
     // First try the expected type if provided
     if (expectedType) {
       const response = await fetch(
-        `https://flickystream.co/proxy/?url=api.themoviedb.org/3/${expectedType}/${mediaId}?api_key=${env.TMDB_API_KEY}`
+        `https://api.themoviedb.org/3/${expectedType}/${mediaId}?api_key=${env.TMDB_API_KEY}`
       );
       
       if (response.ok) {
@@ -30,7 +30,7 @@ async function validateTMDBContent(mediaId: number, expectedType?: 'movie' | 'tv
 
     // If no type provided or expected type failed, try both types
     const movieResponse = await fetch(
-      `https://flickystream.co/proxy/?url=api.themoviedb.org/3/movie/${mediaId}?api_key=${env.TMDB_API_KEY}`
+      `https://api.themoviedb.org/3/movie/${mediaId}?api_key=${env.TMDB_API_KEY}`
     );
 
     if (movieResponse.ok) {
@@ -42,7 +42,7 @@ async function validateTMDBContent(mediaId: number, expectedType?: 'movie' | 'tv
     }
 
     const tvResponse = await fetch(
-      `https://flickystream.co/proxy/?url=api.themoviedb.org/3/tv/${mediaId}?api_key=${env.TMDB_API_KEY}`
+      `https://api.themoviedb.org/3/tv/${mediaId}?api_key=${env.TMDB_API_KEY}`
     );
 
     if (tvResponse.ok) {
