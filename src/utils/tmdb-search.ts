@@ -31,7 +31,7 @@ async function searchAndValidateTMDB(media: Media): Promise<TMDBValidatedContent
   try {
     const query = encodeURIComponent(media.title || media.name || '');
     const searchResponse = await fetch(
-      `https://flickystream.co/proxy/?url=api.themoviedb.org/3/search/multi?api_key=${env.TMDB_API_KEY}&query=${query}`
+      `https://api.themoviedb.org/3/search/multi?api_key=${env.TMDB_API_KEY}&query=${query}`
     );
 
     if (!searchResponse.ok) {
@@ -74,7 +74,7 @@ async function searchAndValidateTMDB(media: Media): Promise<TMDBValidatedContent
         (media.title || media.name || '').split('(')[0].trim()
       );
       const fallbackResponse = await fetch(
-        `https://flickystream.co/proxy/?url=api.themoviedb.org/3/search/multi?api_key=${env.TMDB_API_KEY}&query=${fallbackQuery}`
+        `https://api.themoviedb.org/3/search/multi?api_key=${env.TMDB_API_KEY}&query=${fallbackQuery}`
       );
       
       if (!fallbackResponse.ok) {
@@ -222,7 +222,7 @@ async function getValidatedRoute(
         try {
           // Verify season exists
           const seasonData = await fetch(
-            `https://flickystream.co/proxy/?url=api.themoviedb.org/3/tv/${validatedContent.tmdbId}/season/${episodeInfo?.seasonNumber || 1}?api_key=${env.TMDB_API_KEY}`
+            `https://api.themoviedb.org/3/tv/${validatedContent.tmdbId}/season/${episodeInfo?.seasonNumber || 1}?api_key=${env.TMDB_API_KEY}`
           );
 
           if (!seasonData.ok) {
