@@ -1,5 +1,5 @@
-import { useParams } from 'react-router-dom';
-import { ExternalLink } from 'lucide-react';
+import { useParams, useLocation } from 'react-router-dom';
+import { ExternalLink, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import Navbar from '@/components/Navbar';
@@ -10,9 +10,14 @@ import MediaActions from '@/components/player/MediaActions';
 import { useMediaPlayer } from '@/hooks/use-media-player';
 import { videoSources } from '@/utils/video-sources';
 import { useAuth } from '@/hooks';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
-// Player component with collaboration features (screen sharing, voice, chat, room management)
+/**
+ * Player component for video playback with collaboration features.
+ * Includes room creation/joining, screen sharing, voice chat, group chat, and remote control.
+ * Collaboration options are shown in an overlay triggered by a "More Settings" button.
+ * Automatically prompts for password when joining via URL (?room=ID).
+ */
 const Player = () => {
   // Extract URL parameters for media playback
   const { id, season, episode, type } = useParams<{
@@ -22,6 +27,7 @@ const Player = () => {
     type: string;
   }>();
   const { user } = useAuth();
+  const location = useLocation();
 
   // Media player hook for video playback functionality
   const {
@@ -53,113 +59,182 @@ const Player = () => {
     : undefined;
 
   // State for collaboration features
-  const [isPeerLoaded, setIsPeerLoaded] = useState(false); // Tracks if PeerJS is loaded
+  const [isPeerLoaded, setIsPeerLoaded] = useState(false); // Tracks PeerJS loading
   const [roomID, setRoomID] = useState<string | null>(null); // Current room ID
   const [roomPassword, setRoomPassword] = useState<string | null>(null); // Room password
   const [username, setUsername] = useState<string>(user?.username || 'Anonymous'); // User display name
   const [peers, setPeers] = useState<Map<string, any>>(new Map()); // Connected peers
-  const [dataChannels, setDataChannels] = useState<Map<string, RTCDataChannel>>(new Map()); // Data channels for peers
+  const [dataChannels, setDataChannels] = useState<Map<string, RTCDataChannel>>(new Map()); // Data channels
   const [chatMessages, setChatMessages] = useState<
-    { sender: string; message: string; timestamp: number }[]
+    { sender: string; message: string; timestamp: number; color: string }[]
   >([]); // Chat message history
   const [isSharingScreen, setIsSharingScreen] = useState(false); // Screen sharing status
-  const [sharedStreams, setSharedStreams] = useState<Map<string, MediaStream>>(new Map()); // Remote peer streams
+  const [sharedStreams, setSharedStreams] = useState<Map<string, MediaStream>>(new Map()); // Remote streams
   const [localStream, setLocalStream] = useState<MediaStream | null>(null); // Local media stream
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(false); // Voice chat status
   const [isChatOpen, setIsChatOpen] = useState(false); // Chat panel visibility
   const [chatInput, setChatInput] = useState(''); // Chat input field
   const [isControlling, setIsControlling] = useState<Map<string, boolean>>(new Map()); // Remote control permissions
-  const [remoteControlRequests, setRemoteControlRequests] = useState<string[]>([]); // Pending control requests
+  const [remoteControlRequests, setRemoteControlRequests] = useState<string[]>([]); // Control requests
   const [myPeerID, setMyPeerID] = useState<string | null>(null); // Local peer ID
   const [isCreator, setIsCreator] = useState(false); // Room creator status
   const [roomTimeout, setRoomTimeout] = useState<NodeJS.Timeout | null>(null); // Room expiration timer
-  const [connectionStatus, setConnectionStatus] = useState<string>('Disconnected'); // Peer connection status
+  const [connectionStatus, setConnectionStatus] = useState<string>('Disconnected'); // Connection status
+  const [errorMessage, setErrorMessage] = useState<string | null>(null); // Error modal message
+  const [connectionLogs, setConnectionLogs] = useState<string[]>([]); // Connection log history
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false); // Overlay visibility
 
   // Refs for DOM and WebRTC
   const peerRef = useRef<any>(null); // PeerJS instance
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map()); // Remote video elements
   const chatRef = useRef<HTMLDivElement>(null); // Chat container
+  const logRef = useRef<HTMLDivElement>(null); // Connection log container
 
-  // Load PeerJS from CDN
+  /**
+   * Generates a random color for chat messages
+   * @returns {string} Hex color code
+   */
+  const generateUserColor = useCallback(() => {
+    const letters = '0123456789ABCDEF';
+    let color = '#';
+    for (let i = 0; i < 6; i++) {
+      color += letters[Math.floor(Math.random() * 16)];
+    }
+    return color;
+  }, []);
+
+  /**
+   * Sanitizes user input to prevent XSS
+   * @param {string} input - User input
+   * @returns {string} Sanitized input
+   */
+  const sanitizeInput = useCallback((input: string) => {
+    return input.replace(/[<>&"']/g, (char) => {
+      const escapes: { [key: string]: string } = {
+        '<': '&lt;',
+        '>': '&gt;',
+        '&': '&amp;',
+        '"': '&quot;',
+        "'": '&#x27;',
+      };
+      return escapes[char] || char;
+    });
+  }, []);
+
+  /**
+   * Logs a connection event
+   * @param {string} message - Log message
+   */
+  const logConnectionEvent = useCallback((message: string) => {
+    setConnectionLogs((prev) => [...prev, `${new Date().toLocaleString()}: ${message}`]);
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+    console.log(message);
+  }, []);
+
+  /**
+   * Loads PeerJS from CDN
+   */
   useEffect(() => {
-    // Create script element for PeerJS
     const script = document.createElement('script');
     script.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
     script.async = true;
     script.onload = () => {
       setIsPeerLoaded(true);
-      console.log('PeerJS loaded successfully');
+      logConnectionEvent('PeerJS loaded successfully');
     };
     script.onerror = () => {
-      console.error('Failed to load PeerJS');
-      setConnectionStatus('Failed to load PeerJS');
+      setErrorMessage('Failed to load PeerJS');
+      logConnectionEvent('Failed to load PeerJS');
     };
     document.body.appendChild(script);
 
-    // Cleanup on unmount
     return () => {
       document.body.removeChild(script);
       if (peerRef.current) {
         peerRef.current.destroy();
-        console.log('PeerJS instance destroyed');
+        logConnectionEvent('PeerJS instance destroyed');
       }
       if (roomTimeout) {
         clearTimeout(roomTimeout);
-        console.log('Room timeout cleared');
+        logConnectionEvent('Room timeout cleared');
       }
       if (localStream) {
         localStream.getTracks().forEach((track) => track.stop());
-        console.log('Local stream stopped');
+        logConnectionEvent('Local stream stopped');
       }
     };
-  }, []);
+  }, [logConnectionEvent]);
 
-  // Initialize PeerJS when loaded
+  /**
+   * Initializes PeerJS connection
+   */
   useEffect(() => {
     if (isPeerLoaded && !peerRef.current) {
       const Peer = (window as any).Peer;
       const tempPeerID = crypto.randomUUID();
-      peerRef.current = new Peer(tempPeerID, {
-        debug: 2, // Enable detailed logging
-      });
+      peerRef.current = new Peer(tempPeerID, { debug: 3 });
 
       peerRef.current.on('open', (id: string) => {
         setMyPeerID(id);
         setConnectionStatus('Connected');
-        console.log('Peer connection opened, ID:', id);
+        logConnectionEvent(`Peer connection opened, ID: ${id}`);
       });
 
       peerRef.current.on('connection', handleIncomingDataConnection);
       peerRef.current.on('call', handleIncomingCall);
       peerRef.current.on('error', (err: any) => {
-        console.error('PeerJS error:', err);
-        setConnectionStatus(`Error: ${err.message}`);
+        setErrorMessage(`PeerJS error: ${err.message}`);
+        logConnectionEvent(`PeerJS error: ${err.message}`);
       });
     }
-  }, [isPeerLoaded]);
+  }, [isPeerLoaded, logConnectionEvent]);
 
-  // Create a new room
-  const createRoom = () => {
+  /**
+   * Checks for room ID in URL and prompts for password
+   */
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const joinRoomID = searchParams.get('room');
+    if (joinRoomID && !roomID && isPeerLoaded) {
+      const password = prompt('Enter room password:');
+      if (!password) {
+        setErrorMessage('Password is required to join the room');
+        logConnectionEvent('Password prompt cancelled');
+        return;
+      }
+      joinRoom(joinRoomID, password);
+    }
+  }, [location.search, isPeerLoaded, roomID, logConnectionEvent]);
+
+  /**
+   * Creates a new collaboration room
+   */
+  const createRoom = useCallback(() => {
     if (!peerRef.current) {
-      alert('PeerJS not loaded');
+      setErrorMessage('PeerJS not loaded');
       return;
     }
 
     const newUsername = prompt('Enter your username:') || 'Anonymous';
     const password = prompt('Enter room password:');
     if (!password) {
-      alert('Password is required');
+      setErrorMessage('Password is required');
       return;
     }
 
+    const sanitizedUsername = sanitizeInput(newUsername);
+    const sanitizedPassword = sanitizeInput(password);
     const newRoomID = crypto.randomUUID();
+
     setRoomID(newRoomID);
-    setRoomPassword(password);
-    setUsername(newUsername);
+    setRoomPassword(sanitizedPassword);
+    setUsername(sanitizedUsername);
     setIsCreator(true);
     setConnectionStatus('Creating room...');
+    logConnectionEvent('Creating room...');
 
-    // Reinitialize peer with room ID
     peerRef.current.destroy();
     const Peer = (window as any).Peer;
     peerRef.current = new Peer(newRoomID);
@@ -167,68 +242,84 @@ const Player = () => {
     peerRef.current.on('open', (id: string) => {
       setMyPeerID(id);
       setConnectionStatus('Room created');
-      console.log('Room created with ID:', id);
       const roomURL = `${window.location.origin}${window.location.pathname}?room=${id}`;
       prompt('Share this URL with others:', roomURL);
+      logConnectionEvent(`Room created with ID: ${id}`);
 
-      // Set room to expire after 6 hours (21600000 ms)
       const timeout = setTimeout(() => {
         destroyRoom();
-      }, 21600000);
+      }, 21600000); // 6 hours
       setRoomTimeout(timeout);
-      console.log('Room timeout set for 6 hours');
     });
 
     peerRef.current.on('connection', handleIncomingDataConnection);
     peerRef.current.on('call', handleIncomingCall);
     peerRef.current.on('error', (err: any) => {
-      console.error('Room creation error:', err);
-      setConnectionStatus(`Room error: ${err.message}`);
+      setErrorMessage(`Room creation error: ${err.message}`);
+      logConnectionEvent(`Room creation error: ${err.message}`);
     });
-  };
+  }, [logConnectionEvent, sanitizeInput]);
 
-  // Join an existing room
-  const joinRoom = () => {
-    if (!peerRef.current) {
-      alert('PeerJS not loaded');
-      return;
-    }
-
-    const roomURL = prompt('Enter room URL:');
-    if (!roomURL) {
-      alert('Room URL is required');
-      return;
-    }
-
-    try {
-      const url = new URL(roomURL);
-      const joinRoomID = url.searchParams.get('room');
-      if (!joinRoomID) {
-        alert('Invalid room URL');
+  /**
+   * Joins a room with a given ID and password
+   * @param {string} joinRoomID - Room ID
+   * @param {string} password - Room password
+   */
+  const joinRoom = useCallback(
+    (joinRoomID?: string, providedPassword?: string) => {
+      if (!peerRef.current) {
+        setErrorMessage('PeerJS not loaded');
         return;
+      }
+
+      let finalRoomID = joinRoomID;
+      let password = providedPassword;
+
+      if (!joinRoomID) {
+        const roomURL = prompt('Enter room URL:');
+        if (!roomURL) {
+          setErrorMessage('Room URL is required');
+          return;
+        }
+
+        try {
+          const url = new URL(roomURL);
+          finalRoomID = url.searchParams.get('room');
+          if (!finalRoomID) {
+            setErrorMessage('Invalid room URL');
+            return;
+          }
+          password = prompt('Enter room password:');
+          if (!password) {
+            setErrorMessage('Password is required');
+            return;
+          }
+        } catch (err) {
+          setErrorMessage('Invalid room URL format');
+          logConnectionEvent(`Invalid URL: ${err.message}`);
+          return;
+        }
       }
 
       const joinUsername = prompt('Enter your username (optional):') || 'Anonymous';
-      const password = prompt('Enter room password:');
-      if (!password) {
-        alert('Password is required');
-        return;
-      }
+      const sanitizedUsername = sanitizeInput(joinUsername);
+      const sanitizedPassword = sanitizeInput(password || '');
 
-      setRoomID(joinRoomID);
-      setUsername(joinUsername);
-      setRoomPassword(password);
+      setRoomID(finalRoomID!);
+      setUsername(sanitizedUsername);
+      setRoomPassword(sanitizedPassword);
       setConnectionStatus('Joining room...');
+      logConnectionEvent('Joining room...');
 
-      const conn = peerRef.current.connect(joinRoomID);
+      const conn = peerRef.current.connect(finalRoomID!);
       conn.on('open', () => {
-        console.log('Connected to room creator:', joinRoomID);
         conn.send({
           type: 'join-request',
-          password,
-          username: joinUsername,
+          password: sanitizedPassword,
+          username: sanitizedUsername,
           peerID: myPeerID,
         });
+        logConnectionEvent(`Connected to room creator: ${finalRoomID}`);
       });
 
       conn.on('data', (data: any) => {
@@ -244,207 +335,241 @@ const Player = () => {
             return newMap;
           });
           setConnectionStatus('Joined room');
-          alert('Joined room successfully');
+          logConnectionEvent('Joined room successfully');
         } else if (data.type === 'join-rejected') {
-          alert('Invalid password or rejected');
+          setErrorMessage('Invalid password or rejected');
           setRoomID(null);
           setRoomPassword(null);
           setConnectionStatus('Join rejected');
+          logConnectionEvent('Join rejected');
         }
       });
 
       conn.on('error', (err: any) => {
-        console.error('Connection error:', err);
-        setConnectionStatus(`Connection error: ${err.message}`);
+        setErrorMessage(`Connection error: ${err.message}`);
+        logConnectionEvent(`Connection error: ${err.message}`);
       });
 
-      addPeerConnection(joinRoomID, conn);
-    } catch (err) {
-      console.error('Invalid URL:', err);
-      alert('Invalid room URL format');
-      setConnectionStatus('Invalid URL');
-    }
-  };
+      addPeerConnection(finalRoomID!, conn);
+    },
+    [myPeerID, sanitizeInput, logConnectionEvent]
+  );
 
-  // Handle incoming data connection
-  const handleIncomingDataConnection = (conn: any) => {
-    conn.on('open', () => {
-      console.log('Data connection opened with peer:', conn.peer);
-      setConnectionStatus(`Connected to ${conn.peer}`);
-    });
+  /**
+   * Handles incoming data connections from peers
+   * @param {any} conn - PeerJS connection object
+   */
+  const handleIncomingDataConnection = useCallback(
+    (conn: any) => {
+      conn.on('open', () => {
+        logConnectionEvent(`Data connection opened with peer: ${conn.peer}`);
+      });
 
-    conn.on('data', (data: any) => {
-      console.log('Received data from', conn.peer, ':', data);
-      if (data.type === 'join-request') {
-        handleJoinRequest(conn, data);
-      } else if (data.type === 'chat') {
-        setChatMessages((prev) => [
-          ...prev,
-          {
-            sender: data.sender,
-            message: data.message,
-            timestamp: Date.now(),
-          },
-        ]);
-        if (chatRef.current) {
-          chatRef.current.scrollTop = chatRef.current.scrollHeight;
+      conn.on('data', (data: any) => {
+        if (data.type === 'join-request') {
+          handleJoinRequest(conn, data);
+        } else if (data.type === 'chat') {
+          setChatMessages((prev) => [
+            ...prev,
+            {
+              sender: data.sender,
+              message: sanitizeInput(data.message),
+              timestamp: Date.now(),
+              color: generateUserColor(),
+            },
+          ]);
+          if (chatRef.current) {
+            chatRef.current.scrollTop = chatRef.current.scrollHeight;
+          }
+        } else if (data.type === 'control-request') {
+          setRemoteControlRequests((prev) => [...prev, conn.peer]);
+          logConnectionEvent(`Control request from ${conn.peer}`);
+        } else if (data.type === 'control-grant') {
+          setIsControlling((prev) => {
+            const newMap = new Map(prev);
+            newMap.set(conn.peer, true);
+            return newMap;
+          });
+          logConnectionEvent(`Control granted by ${conn.peer}`);
+        } else if (data.type === 'control-revoke') {
+          setIsControlling((prev) => {
+            const newMap = new Map(prev);
+            newMap.delete(conn.peer);
+            return newMap;
+          });
+          logConnectionEvent(`Control revoked by ${conn.peer}`);
+        } else if (data.type === 'control-event') {
+          handleRemoteControlEvent(data.event);
+        } else if (data.type === 'peer-list-update') {
+          const newPeers = data.peers.filter((p: string) => p !== myPeerID);
+          newPeers.forEach((p: string) => connectToPeer(p));
+        } else if (data.type === 'room-destroyed') {
+          setErrorMessage('Room has been destroyed by creator');
+          leaveRoom();
         }
-      } else if (data.type === 'control-request') {
-        setRemoteControlRequests((prev) => [...prev, conn.peer]);
-      } else if (data.type === 'control-grant') {
-        setIsControlling((prev) => {
-          const newMap = new Map(prev);
-          newMap.set(conn.peer, true);
-          return newMap;
+      });
+
+      conn.on('close', () => {
+        removePeerConnection(conn.peer);
+        logConnectionEvent(`Data connection closed with ${conn.peer}`);
+      });
+
+      conn.on('error', (err: any) => {
+        logConnectionEvent(`Data connection error with ${conn.peer}: ${err.message}`);
+      });
+
+      addPeerConnection(conn.peer, conn);
+    },
+    [myPeerID, sanitizeInput, generateUserColor, logConnectionEvent]
+  );
+
+  /**
+   * Handles join requests from peers (creator only)
+   * @param {any} conn - PeerJS connection
+   * @param {any} data - Join request data
+   */
+  const handleJoinRequest = useCallback(
+    (conn: any, data: any) => {
+      if (!isCreator) return;
+
+      if (data.password === roomPassword) {
+        conn.send({
+          type: 'join-accepted',
+          peers: Array.from(peers.keys()),
         });
-      } else if (data.type === 'control-revoke') {
-        setIsControlling((prev) => {
-          const newMap = new Map(prev);
-          newMap.delete(conn.peer);
-          return newMap;
+        broadcastToPeers({
+          type: 'peer-list-update',
+          peers: [data.peerID],
         });
-      } else if (data.type === 'control-event') {
-        handleRemoteControlEvent(data.event);
-      } else if (data.type === 'peer-list-update') {
-        const newPeers = data.peers.filter((p: string) => p !== myPeerID);
-        newPeers.forEach((p: string) => {
-          connectToPeer(p);
-        });
-      } else if (data.type === 'room-destroyed') {
-        alert('Room has been destroyed by creator');
-        leaveRoom();
+        addPeerConnection(data.peerID, conn);
+        logConnectionEvent(`${data.username} joined room`);
+      } else {
+        conn.send({ type: 'join-rejected' });
+        conn.close();
+        setErrorMessage(`${data.username} attempted to join with wrong password`);
+        logConnectionEvent(`${data.username} rejected: wrong password`);
       }
-    });
+    },
+    [isCreator, roomPassword, logConnectionEvent]
+  );
 
-    conn.on('close', () => {
-      console.log('Data connection closed with', conn.peer);
-      removePeerConnection(conn.peer);
-    });
+  /**
+   * Connects to a new peer
+   * @param {string} peerID - Peer ID to connect to
+   */
+  const connectToPeer = useCallback(
+    (peerID: string) => {
+      if (peers.has(peerID) || peerID === myPeerID) {
+        logConnectionEvent(`Skipped connection to ${peerID} (already connected or self)`);
+        return;
+      }
 
-    conn.on('error', (err: any) => {
-      console.error('Data connection error with', conn.peer, ':', err);
-    });
-
-    addPeerConnection(conn.peer, conn);
-  };
-
-  // Handle join request (creator only)
-  const handleJoinRequest = (conn: any, data: any) => {
-    if (!isCreator) return;
-
-    if (data.password === roomPassword) {
-      conn.send({
-        type: 'join-accepted',
-        peers: Array.from(peers.keys()),
+      const conn = peerRef.current.connect(peerID);
+      conn.on('open', () => {
+        setConnectionStatus(`Connected to ${peerID}`);
+        logConnectionEvent(`Connected to peer: ${peerID}`);
       });
-      broadcastToPeers({
-        type: 'peer-list-update',
-        peers: [data.peerID],
+      conn.on('data', handleDataFromPeer);
+      conn.on('close', () => {
+        removePeerConnection(peerID);
       });
-      addPeerConnection(data.peerID, conn);
-      alert(`${data.username} has joined the room`);
-      setConnectionStatus(`${data.username} joined`);
-    } else {
-      conn.send({ type: 'join-rejected' });
-      conn.close();
-      alert(`${data.username} attempted to join with wrong password`);
-      setConnectionStatus('Join attempt rejected');
-    }
-  };
+      conn.on('error', (err: any) => {
+        setErrorMessage(`Peer connection error: ${err.message}`);
+        logConnectionEvent(`Peer connection error: ${err.message}`);
+      });
 
-  // Connect to a peer
-  const connectToPeer = (peerID: string) => {
-    if (peers.has(peerID) || peerID === myPeerID) {
-      console.log('Already connected to', peerID, 'or self');
-      return;
-    }
+      addPeerConnection(peerID, conn);
 
-    const conn = peerRef.current.connect(peerID);
-    conn.on('open', () => {
-      console.log('Connected to peer:', peerID);
-      setConnectionStatus(`Connected to ${peerID}`);
-    });
-    conn.on('data', handleDataFromPeer);
-    conn.on('close', () => {
-      console.log('Disconnected from peer:', peerID);
-      removePeerConnection(peerID);
-    });
-    conn.on('error', (err: any) => {
-      console.error('Peer connection error:', err);
-      setConnectionStatus(`Peer error: ${err.message}`);
-    });
+      if (isVoiceEnabled && localStream) {
+        callPeerWithStream(peerID, localStream);
+      }
+      if (isSharingScreen && localStream) {
+        callPeerWithStream(peerID, localStream);
+      }
+    },
+    [myPeerID, isVoiceEnabled, isSharingScreen, localStream, logConnectionEvent]
+  );
 
-    addPeerConnection(peerID, conn);
+  /**
+   * Handles data from peers
+   * @param {any} data - Received data
+   */
+  const handleDataFromPeer = useCallback((data: any) => {
+    logConnectionEvent(`Received data: ${JSON.stringify(data)}`);
+  }, [logConnectionEvent]);
 
-    if (isVoiceEnabled && localStream) {
-      callPeerWithStream(peerID, localStream);
-    }
-    if (isSharingScreen && localStream) {
-      callPeerWithStream(peerID, localStream);
-    }
-  };
-
-  // Handle data from peers
-  const handleDataFromPeer = (data: any) => {
-    // Centralized handling if needed
-    console.log('Data from peer:', data);
-  };
-
-  // Add peer connection
-  const addPeerConnection = (peerID: string, conn: any) => {
+  /**
+   * Adds a peer connection
+   * @param {string} peerID - Peer ID
+   * @param {any} conn - Connection object
+   */
+  const addPeerConnection = useCallback((peerID: string, conn: any) => {
     setPeers((prev) => {
       const newMap = new Map(prev);
       newMap.set(peerID, conn);
       return newMap;
     });
-    console.log('Added peer connection:', peerID);
-  };
+    logConnectionEvent(`Added peer connection: ${peerID}`);
+  }, [logConnectionEvent]);
 
-  // Remove peer connection
-  const removePeerConnection = (peerID: string) => {
-    setPeers((prev) => {
-      const newMap = new Map(prev);
-      newMap.delete(peerID);
-      return newMap;
-    });
-    setSharedStreams((prev) => {
-      const newMap = new Map(prev);
-      newMap.delete(peerID);
-      return newMap;
-    });
-    setIsControlling((prev) => {
-      const newMap = new Map(prev);
-      newMap.delete(peerID);
-      return newMap;
-    });
-    setDataChannels((prev) => {
-      const newMap = new Map(prev);
-      newMap.delete(peerID);
-      return newMap;
-    });
-    if (videoRefs.current.has(peerID)) {
-      videoRefs.current.delete(peerID);
-    }
-    console.log('Removed peer connection:', peerID);
-    setConnectionStatus(`Disconnected from ${peerID}`);
-  };
-
-  // Broadcast message to all peers
-  const broadcastToPeers = (data: any) => {
-    peers.forEach((conn) => {
-      if (conn.open) {
-        try {
-          conn.send(data);
-          console.log('Sent data to', conn.peer, ':', data);
-        } catch (err) {
-          console.error('Error sending to', conn.peer, ':', err);
-        }
+  /**
+   * Removes a peer connection
+   * @param {string} peerID - Peer ID
+   */
+  const removePeerConnection = useCallback(
+    (peerID: string) => {
+      setPeers((prev) => {
+        const newMap = new Map(prev);
+        newMap.delete(peerID);
+        return newMap;
+      });
+      setSharedStreams((prev) => {
+        const newMap = new Map(prev);
+        newMap.delete(peerID);
+        return newMap;
+      });
+      setIsControlling((prev) => {
+        const newMap = new Map(prev);
+        newMap.delete(peerID);
+        return newMap;
+      });
+      setDataChannels((prev) => {
+        const newMap = new Map(prev);
+        newMap.delete(peerID);
+        return newMap;
+      });
+      if (videoRefs.current.has(peerID)) {
+        videoRefs.current.delete(peerID);
       }
-    });
-  };
+      logConnectionEvent(`Removed peer connection: ${peerID}`);
+    },
+    [logConnectionEvent]
+  );
 
-  // Start screen sharing
-  const startScreenShare = async () => {
+  /**
+   * Broadcasts data to all connected peers
+   * @param {any} data - Data to send
+   */
+  const broadcastToPeers = useCallback(
+    (data: any) => {
+      peers.forEach((conn) => {
+        if (conn.open) {
+          try {
+            conn.send(data);
+            logConnectionEvent(`Sent data to ${conn.peer}: ${JSON.stringify(data)}`);
+          } catch (err) {
+            logConnectionEvent(`Error sending to ${conn.peer}: ${err.message}`);
+          }
+        }
+      });
+    },
+    [peers, logConnectionEvent]
+  );
+
+  /**
+   * Starts screen sharing
+   */
+  const startScreenShare = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
@@ -453,6 +578,7 @@ const Player = () => {
       setLocalStream(stream);
       setIsSharingScreen(true);
       setConnectionStatus('Screen sharing started');
+      logConnectionEvent('Screen sharing started');
 
       peers.forEach((_, peerID) => {
         callPeerWithStream(peerID, stream);
@@ -461,29 +587,32 @@ const Player = () => {
       stream.getTracks().forEach((track) => {
         track.onended = () => {
           stopScreenShare();
-          console.log('Screen share ended by user');
+          logConnectionEvent('Screen share ended by user');
         };
       });
     } catch (err) {
-      console.error('Screen share error:', err);
-      alert('Failed to start screen sharing');
-      setConnectionStatus('Screen share failed');
+      setErrorMessage('Failed to start screen sharing');
+      logConnectionEvent(`Screen share error: ${err.message}`);
     }
-  };
+  }, [peers, logConnectionEvent]);
 
-  // Stop screen sharing
-  const stopScreenShare = () => {
+  /**
+   * Stops screen sharing
+   */
+  const stopScreenShare = useCallback(() => {
     if (localStream) {
       localStream.getTracks().forEach((track) => track.stop());
       setLocalStream(null);
     }
     setIsSharingScreen(false);
     setConnectionStatus('Screen sharing stopped');
-    console.log('Screen sharing stopped');
-  };
+    logConnectionEvent('Screen sharing stopped');
+  }, [localStream, logConnectionEvent]);
 
-  // Enable voice chat
-  const enableVoice = async () => {
+  /**
+   * Enables voice chat
+   */
+  const enableVoice = useCallback(async () => {
     try {
       const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (!localStream) {
@@ -495,90 +624,107 @@ const Player = () => {
       }
       setIsVoiceEnabled(true);
       setConnectionStatus('Voice enabled');
+      logConnectionEvent('Voice enabled');
 
       peers.forEach((_, peerID) => {
         callPeerWithStream(peerID, localStream!);
       });
     } catch (err) {
-      console.error('Voice enable error:', err);
-      alert('Failed to enable voice');
-      setConnectionStatus('Voice enable failed');
+      setErrorMessage('Failed to enable voice');
+      logConnectionEvent(`Voice enable error: ${err.message}`);
     }
-  };
+  }, [localStream, peers, logConnectionEvent]);
 
-  // Disable voice chat
-  const disableVoice = () => {
+  /**
+   * Disables voice chat
+   */
+  const disableVoice = useCallback(() => {
     if (localStream) {
       localStream.getAudioTracks().forEach((track) => track.stop());
     }
     setIsVoiceEnabled(false);
     setConnectionStatus('Voice disabled');
-    console.log('Voice disabled');
-  };
+    logConnectionEvent('Voice disabled');
+  }, [localStream, logConnectionEvent]);
 
-  // Call peer with media stream
-  const callPeerWithStream = (peerID: string, stream: MediaStream) => {
-    try {
-      const call = peerRef.current.call(peerID, stream);
+  /**
+   * Calls a peer with a media stream
+   * @param {string} peerID - Peer ID
+   * @param {MediaStream} stream - Media stream
+   */
+  const callPeerWithStream = useCallback(
+    (peerID: string, stream: MediaStream) => {
+      try {
+        const call = peerRef.current.call(peerID, stream);
+        call.on('stream', (remoteStream: MediaStream) => {
+          logConnectionEvent(`Received stream from ${peerID}`);
+        });
+        call.on('close', () => {
+          logConnectionEvent(`Call with ${peerID} closed`);
+        });
+        call.on('error', (err: any) => {
+          setErrorMessage(`Call error with ${peerID}`);
+          logConnectionEvent(`Call error with ${peerID}: ${err.message}`);
+        });
+      } catch (err) {
+        setErrorMessage(`Failed to call ${peerID}`);
+        logConnectionEvent(`Failed to call ${peerID}: ${err.message}`);
+      }
+    },
+    [logConnectionEvent]
+  );
+
+  /**
+   * Handles incoming media calls
+   * @param {any} call - PeerJS call object
+   */
+  const handleIncomingCall = useCallback(
+    (call: any) => {
+      call.answer(null);
       call.on('stream', (remoteStream: MediaStream) => {
-        console.log('Received stream from', peerID);
+        setSharedStreams((prev) => {
+          const newMap = new Map(prev);
+          newMap.set(call.peer, remoteStream);
+          return newMap;
+        });
+        logConnectionEvent(`Receiving stream from ${call.peer}`);
+
+        if (remoteStream.getAudioTracks().length > 0) {
+          const audio = new Audio();
+          audio.srcObject = remoteStream;
+          audio.play().catch((err) => logConnectionEvent(`Audio play error: ${err.message}`));
+        }
       });
       call.on('close', () => {
-        console.log('Call with', peerID, 'closed');
+        setSharedStreams((prev) => {
+          const newMap = new Map(prev);
+          newMap.delete(call.peer);
+          return newMap;
+        });
+        logConnectionEvent(`Stream from ${call.peer} closed`);
       });
       call.on('error', (err: any) => {
-        console.error('Call error with', peerID, ':', err);
-        setConnectionStatus(`Call error with ${peerID}`);
+        setErrorMessage(`Call error: ${err.message}`);
+        logConnectionEvent(`Call error: ${err.message}`);
       });
-    } catch (err) {
-      console.error('Failed to call', peerID, ':', err);
-    }
-  };
+    },
+    [logConnectionEvent]
+  );
 
-  // Handle incoming call (media stream)
-  const handleIncomingCall = (call: any) => {
-    call.answer(null); // Receive stream without sending back
-    call.on('stream', (remoteStream: MediaStream) => {
-      setSharedStreams((prev) => {
-        const newMap = new Map(prev);
-        newMap.set(call.peer, remoteStream);
-        return newMap;
-      });
-      setConnectionStatus(`Receiving stream from ${call.peer}`);
-      console.log('Received stream from', call.peer);
-
-      if (remoteStream.getAudioTracks().length > 0) {
-        const audio = new Audio();
-        audio.srcObject = remoteStream;
-        audio.play().catch((err) => console.error('Audio play error:', err));
-      }
-    });
-    call.on('close', () => {
-      setSharedStreams((prev) => {
-        const newMap = new Map(prev);
-        newMap.delete(call.peer);
-        return newMap;
-      });
-      console.log('Stream from', call.peer, 'closed');
-      setConnectionStatus(`Stream from ${call.peer} closed`);
-    });
-    call.on('error', (err: any) => {
-      console.error('Call error:', err);
-      setConnectionStatus(`Call error: ${err.message}`);
-    });
-  };
-
-  // Send chat message
-  const sendChat = () => {
+  /**
+   * Sends a chat message
+   */
+  const sendChat = useCallback(() => {
     if (!chatInput.trim()) {
-      alert('Cannot send empty message');
+      setErrorMessage('Cannot send empty message');
       return;
     }
 
+    const sanitizedMessage = sanitizeInput(chatInput);
     const message = {
       type: 'chat',
       sender: username,
-      message: chatInput,
+      message: sanitizedMessage,
     };
 
     broadcastToPeers(message);
@@ -586,8 +732,9 @@ const Player = () => {
       ...prev,
       {
         sender: username,
-        message: chatInput,
+        message: sanitizedMessage,
         timestamp: Date.now(),
+        color: generateUserColor(),
       },
     ]);
     setChatInput('');
@@ -595,86 +742,109 @@ const Player = () => {
       chatRef.current.scrollTop = chatRef.current.scrollHeight;
     }
     setConnectionStatus('Chat message sent');
-    console.log('Sent chat message:', chatInput);
-  };
+    logConnectionEvent(`Sent chat message: ${sanitizedMessage}`);
+  }, [chatInput, username, sanitizeInput, generateUserColor, logConnectionEvent]);
 
-  // Request remote control
-  const requestControl = (peerID: string) => {
-    const conn = peers.get(peerID);
-    if (conn) {
-      conn.send({ type: 'control-request' });
-      console.log('Requested control from', peerID);
-      setConnectionStatus(`Requested control from ${peerID}`);
-    } else {
-      console.error('No connection to', peerID);
-      setConnectionStatus('Control request failed: No connection');
-    }
-  };
-
-  // Grant remote control
-  const grantControl = (peerID: string) => {
-    const conn = peers.get(peerID);
-    if (conn) {
-      conn.send({ type: 'control-grant' });
-      setRemoteControlRequests((prev) => prev.filter((id) => id !== peerID));
-      console.log('Granted control to', peerID);
-      setConnectionStatus(`Granted control to ${peerID}`);
-    }
-  };
-
-  // Revoke remote control
-  const revokeControl = (peerID: string) => {
-    const conn = peers.get(peerID);
-    if (conn) {
-      conn.send({ type: 'control-revoke' });
-      console.log('Revoked control from', peerID);
-      setConnectionStatus(`Revoked control from ${peerID}`);
-    }
-  };
-
-  // Handle remote control events
-  const handleRemoteControlEvent = (eventData: any) => {
-    try {
-      let event;
-      switch (eventData.type) {
-        case 'mousemove':
-          event = new MouseEvent('mousemove', {
-            clientX: eventData.clientX,
-            clientY: eventData.clientY,
-            bubbles: true,
-            cancelable: true,
-          });
-          break;
-        case 'click':
-          event = new MouseEvent('click', {
-            clientX: eventData.clientX,
-            clientY: eventData.clientY,
-            button: eventData.button,
-            bubbles: true,
-            cancelable: true,
-          });
-          break;
-        case 'keydown':
-          event = new KeyboardEvent('keydown', {
-            key: eventData.key,
-            code: eventData.code,
-            bubbles: true,
-            cancelable: true,
-          });
-          break;
-        default:
-          console.warn('Unknown control event:', eventData.type);
-          return;
+  /**
+   * Requests remote control from a peer
+   * @param {string} peerID - Peer ID
+   */
+  const requestControl = useCallback(
+    (peerID: string) => {
+      const conn = peers.get(peerID);
+      if (conn) {
+        conn.send({ type: 'control-request' });
+        logConnectionEvent(`Requested control from ${peerID}`);
+      } else {
+        setErrorMessage('No connection to peer');
+        logConnectionEvent(`Control request failed: No connection to ${peerID}`);
       }
-      document.dispatchEvent(event);
-      console.log('Dispatched control event:', eventData.type);
-    } catch (err) {
-      console.error('Control event error:', err);
-      setConnectionStatus('Control event error');
-    }
-  };
+    },
+    [peers, logConnectionEvent]
+  );
 
-  // Capture local control events
+  /**
+   * Grants remote control to a peer
+   * @param {string} peerID - Peer ID
+   */
+  const grantControl = useCallback(
+    (peerID: string) => {
+      const conn = peers.get(peerID);
+      if (conn) {
+        conn.send({ type: 'control-grant' });
+        setRemoteControlRequests((prev) => prev.filter((id) => id !== peerID));
+        logConnectionEvent(`Granted control to ${peerID}`);
+      }
+    },
+    [peers, logConnectionEvent]
+  );
+
+  /**
+   * Revokes remote control from a peer
+   * @param {string} peerID - Peer ID
+   */
+  const revokeControl = useCallback(
+    (peerID: string) => {
+      const conn = peers.get(peerID);
+      if (conn) {
+        conn.send({ type: 'control-revoke' });
+        logConnectionEvent(`Revoked control from ${peerID}`);
+      }
+    },
+    [peers, logConnectionEvent]
+  );
+
+  /**
+   * Handles remote control events
+   * @param {any} eventData - Event data
+   */
+  const handleRemoteControlEvent = useCallback(
+    (eventData: any) => {
+      try {
+        let event;
+        switch (eventData.type) {
+          case 'mousemove':
+            event = new MouseEvent('mousemove', {
+              clientX: eventData.clientX,
+              clientY: eventData.clientY,
+              bubbles: true,
+              cancelable: true,
+            });
+            break;
+          case 'click':
+            event = new MouseEvent('click', {
+              clientX: eventData.clientX,
+              clientY: eventData.clientY,
+              button: eventData.button,
+              bubbles: true,
+              cancelable: true,
+            });
+            break;
+          case 'keydown':
+            event = new KeyboardEvent('keydown', {
+              key: eventData.key,
+              code: eventData.code,
+              bubbles: true,
+              cancelable: true,
+            });
+            break;
+          default:
+            logConnectionEvent(`Unknown control event: ${eventData.type}`);
+            return;
+        }
+        document.dispatchEvent(event);
+        logConnectionEvent(`Dispatched control event: ${eventData.type}`);
+      } catch (err) {
+        setErrorMessage('Control event error');
+        logConnectionEvent(`Control event error: ${err.message}`);
+      }
+    },
+    [logConnectionEvent]
+  );
+
+  /**
+   * Captures local control events for remote peers
+   */
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       sendControlEventToControlled({
@@ -703,46 +873,54 @@ const Player = () => {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('click', handleClick);
       document.addEventListener('keydown', handleKeyDown);
-      console.log('Control event listeners added');
+      logConnectionEvent('Control event listeners added');
     }
 
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('click', handleClick);
       document.removeEventListener('keydown', handleKeyDown);
-      console.log('Control event listeners removed');
+      logConnectionEvent('Control event listeners removed');
     };
-  }, [isControlling]);
+  }, [isControlling, logConnectionEvent]);
 
-  // Send control events to controlled peers
-  const sendControlEventToControlled = (eventData: any) => {
-    isControlling.forEach((isControl, peerID) => {
-      if (isControl) {
-        const conn = peers.get(peerID);
-        if (conn) {
-          try {
-            conn.send({
-              type: 'control-event',
-              event: eventData,
-            });
-            console.log('Sent control event to', peerID, ':', eventData);
-          } catch (err) {
-            console.error('Error sending control event to', peerID, ':', err);
+  /**
+   * Sends control events to controlled peers
+   * @param {any} eventData - Event data
+   */
+  const sendControlEventToControlled = useCallback(
+    (eventData: any) => {
+      isControlling.forEach((isControl, peerID) => {
+        if (isControl) {
+          const conn = peers.get(peerID);
+          if (conn) {
+            try {
+              conn.send({
+                type: 'control-event',
+                event: eventData,
+              });
+              logConnectionEvent(`Sent control event to ${peerID}: ${eventData.type}`);
+            } catch (err) {
+              logConnectionEvent(`Error sending control event to ${peerID}: ${err.message}`);
+            }
           }
         }
-      }
-    });
-  };
+      });
+    },
+    [isControlling, peers, logConnectionEvent]
+  );
 
-  // Destroy room (creator only)
-  const destroyRoom = () => {
+  /**
+   * Destroys the room (creator only)
+   */
+  const destroyRoom = useCallback(() => {
     if (isCreator) {
       broadcastToPeers({ type: 'room-destroyed' });
       peers.forEach((conn) => {
         try {
           conn.close();
         } catch (err) {
-          console.error('Error closing connection:', err);
+          logConnectionEvent(`Error closing connection: ${err.message}`);
         }
       });
       if (peerRef.current) {
@@ -759,19 +937,21 @@ const Player = () => {
         clearTimeout(roomTimeout);
       }
       setConnectionStatus('Room destroyed');
-      alert('Room destroyed');
-      console.log('Room destroyed');
+      setErrorMessage('Room destroyed');
+      logConnectionEvent('Room destroyed');
     }
-  };
+  }, [isCreator, peers, roomTimeout, logConnectionEvent]);
 
-  // Leave room (non-creator)
-  const leaveRoom = () => {
+  /**
+   * Leaves the room (non-creator)
+   */
+  const leaveRoom = useCallback(() => {
     if (!isCreator) {
       peers.forEach((conn) => {
         try {
           conn.close();
         } catch (err) {
-          console.error('Error closing connection:', err);
+          logConnectionEvent(`Error closing connection: ${err.message}`);
         }
       });
       if (peerRef.current) {
@@ -787,31 +967,95 @@ const Player = () => {
       setIsVoiceEnabled(false);
       setLocalStream(null);
       setConnectionStatus('Left room');
-      console.log('Left room');
+      logConnectionEvent('Left room');
     }
-  };
+  }, [isCreator, peers, logConnectionEvent]);
 
-  // Format timestamp for chat
-  const formatTimestamp = (timestamp: number) => {
+  /**
+   * Formats timestamp for chat messages
+   * @param {number} timestamp - Timestamp
+   * @returns {string} Formatted time
+   */
+  const formatTimestamp = useCallback((timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
+      second: '2-digit',
     });
+  }, []);
+
+  /**
+   * Renders error modal
+   */
+  const renderErrorModal = () => {
+    if (!errorMessage) return null;
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div className="bg-background p-6 rounded-lg border border-white/20">
+          <h3 className="text-white">Error</h3>
+          <p className="text-white/80">{errorMessage}</p>
+          <Button onClick={() => setErrorMessage(null)} className="mt-4">
+            Close
+          </Button>
+        </div>
+      </div>
+    );
   };
 
-  // Render shared screens
+  /**
+   * Renders connected peers list
+   */
+  const renderPeerList = () => {
+    return (
+      <div className="mt-4">
+        <h4 className="text-white">Connected Peers</h4>
+        {peers.size === 0 ? (
+          <p className="text-white/60">No peers connected</p>
+        ) : (
+          <ul className="text-white">
+            {Array.from(peers.keys()).map((peerID) => (
+              <li key={peerID}>{peerID}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  };
+
+  /**
+   * Renders connection logs
+   */
+  const renderConnectionLogs = () => {
+    return (
+      <div className="mt-4">
+        <h4 className="text-white">Connection Logs</h4>
+        <div
+          ref={logRef}
+          className="h-40 overflow-y-auto bg-black/20 p-2 rounded text-white/80"
+        >
+          {connectionLogs.map((log, idx) => (
+            <div key={idx} className="text-sm">{log}</div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  /**
+   * Renders shared screens
+   */
   const renderSharedScreens = () => {
     return Array.from(sharedStreams.entries()).map(([peerID, stream]) => {
       if (stream.getVideoTracks().length > 0) {
         return (
           <div key={peerID} className="mt-4">
-            <h4 className="text-white">Shared screen from {peerID}</h4>
+            <h4 className="text-white">Shared Screen from {peerID}</h4>
             <video
               ref={(el) => {
                 if (el) {
                   videoRefs.current.set(peerID, el);
                   el.srcObject = stream;
-                  el.play().catch((err) => console.error('Video play error:', err));
+                  el.play().catch((err) => logConnectionEvent(`Video play error: ${err.message}`));
                 }
               }}
               autoPlay
@@ -836,7 +1080,9 @@ const Player = () => {
     });
   };
 
-  // Render control requests
+  /**
+   * Renders control requests
+   */
   const renderControlRequests = () => {
     if (isSharingScreen && remoteControlRequests.length > 0) {
       return (
@@ -844,7 +1090,7 @@ const Player = () => {
           <h4 className="text-white">Control Requests</h4>
           {remoteControlRequests.map((peerID) => (
             <div key={peerID} className="flex items-center space-x-2">
-              <span>{peerID} requests control</span>
+              <span className="text-white">{peerID} requests control</span>
               <Button onClick={() => grantControl(peerID)}>Grant</Button>
             </div>
           ))}
@@ -854,12 +1100,14 @@ const Player = () => {
     return null;
   };
 
-  // Render chat panel
+  /**
+   * Renders group chat panel
+   */
   const renderChat = () => {
     return (
       <div
-        className={`fixed bottom-0 right-0 w-80 h-96 bg-background/95 border border-white/10 p-4 transition-all ${
-          isChatOpen ? 'translate-x-0' : 'translate-x-full'
+        className={`w-full h-96 bg-background/95 border border-white/10 p-4 transition-all ${
+          isChatOpen ? 'block' : 'hidden'
         }`}
       >
         <h4 className="text-white">Group Chat</h4>
@@ -869,7 +1117,9 @@ const Player = () => {
         >
           {chatMessages.map((msg, idx) => (
             <div key={idx} className="mb-2">
-              <span className="font-bold text-white">{msg.sender}</span>
+              <span className="font-bold" style={{ color: msg.color }}>
+                {msg.sender}
+              </span>
               <span className="text-gray-400 text-sm ml-2">
                 [{formatTimestamp(msg.timestamp)}]
               </span>
@@ -892,67 +1142,109 @@ const Player = () => {
     );
   };
 
-  // Render collaboration controls
+  /**
+   * Renders collaboration controls in an overlay
+   */
   const renderCollaborationControls = () => {
+    if (!isSettingsOpen) return null;
     return (
-      <div className="space-y-4">
-        <h3 className="text-lg font-medium text-white">Collaboration</h3>
-        <p className="text-sm text-white/60">Connection Status: {connectionStatus}</p>
-        <div className="flex items-center justify-between">
-          <div className="flex space-x-4">
-            {!roomID ? (
-              <>
-                <Button onClick={createRoom}>Create Room</Button>
-                <Button onClick={joinRoom}>Join Room</Button>
-              </>
-            ) : (
-              <>
-                <p className="text-white">Room ID: {roomID}</p>
-                {isCreator ? (
-                  <Button onClick={destroyRoom}>Destroy Room</Button>
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+        <div className="bg-background p-8 rounded-lg border border-white/20 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-lg font-medium text-white">Collaboration Settings</h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsSettingsOpen(false)}
+              className="text-white"
+            >
+              <X className="h-6 w-6" />
+            </Button>
+          </div>
+          <p className="text-sm text-white/60 mb-4">Connection Status: {connectionStatus}</p>
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="flex space-x-4">
+                {!roomID ? (
+                  <>
+                    <Button
+                      onClick={createRoom}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      Create Room
+                    </Button>
+                    <Button
+                      onClick={() => joinRoom()}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      Join Room
+                    </Button>
+                  </>
                 ) : (
-                  <Button onClick={leaveRoom}>Leave Room</Button>
+                  <>
+                    <p className="text-white">Room ID: {roomID}</p>
+                    {isCreator ? (
+                      <Button
+                        onClick={destroyRoom}
+                        className="bg-red-600 hover:bg-red-700"
+                      >
+                        Destroy Room
+                      </Button>
+                    ) : (
+                      <Button
+                        onClick={leaveRoom}
+                        className="bg-red-600 hover:bg-red-700"
+                      >
+                        Leave Room
+                      </Button>
+                    )}
+                  </>
                 )}
-              </>
-            )}
+              </div>
+            </div>
+            <div className="flex space-x-4">
+              <Button
+                onClick={startScreenShare}
+                disabled={isSharingScreen}
+                className={isSharingScreen ? 'bg-gray-500' : 'bg-blue-600 hover:bg-blue-700'}
+              >
+                Start Screen Share
+              </Button>
+              <Button
+                onClick={stopScreenShare}
+                disabled={!isSharingScreen}
+                className={!isSharingScreen ? 'bg-gray-500' : 'bg-blue-600 hover:bg-blue-700'}
+              >
+                Stop Screen Share
+              </Button>
+              <Button
+                onClick={enableVoice}
+                disabled={isVoiceEnabled}
+                className={isVoiceEnabled ? 'bg-gray-500' : 'bg-blue-600 hover:bg-blue-700'}
+              >
+                Enable Voice
+              </Button>
+              <Button
+                onClick={disableVoice}
+                disabled={!isVoiceEnabled}
+                className={!isVoiceEnabled ? 'bg-gray-500' : 'bg-blue-600 hover:bg-blue-700'}
+              >
+                Disable Voice
+              </Button>
+              <Button
+                onClick={() => setIsChatOpen(!isChatOpen)}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {isChatOpen ? 'Hide Chat' : 'Show Chat'}
+              </Button>
+            </div>
+            {renderPeerList()}
+            {renderSharedScreens()}
+            {renderControlRequests()}
+            {renderConnectionLogs()}
+            {renderChat()}
           </div>
         </div>
-        <div className="flex space-x-4">
-          <Button
-            onClick={startScreenShare}
-            disabled={isSharingScreen}
-            className={isSharingScreen ? 'bg-gray-500' : ''}
-          >
-            Start Screen Share
-          </Button>
-          <Button
-            onClick={stopScreenShare}
-            disabled={!isSharingScreen}
-            className={!isSharingScreen ? 'bg-gray-500' : ''}
-          >
-            Stop Screen Share
-          </Button>
-          <Button
-            onClick={enableVoice}
-            disabled={isVoiceEnabled}
-            className={isVoiceEnabled ? 'bg-gray-500' : ''}
-          >
-            Enable Voice
-          </Button>
-          <Button
-            onClick={disableVoice}
-            disabled={!isVoiceEnabled}
-            className={!isVoiceEnabled ? 'bg-gray-500' : ''}
-          >
-            Disable Voice
-          </Button>
-          <Button onClick={() => setIsChatOpen(!isChatOpen)}>
-            {isChatOpen ? 'Hide Chat' : 'Show Chat'}
-          </Button>
-        </div>
-        {renderSharedScreens()}
-        {renderControlRequests()}
-        {renderChat()}
       </div>
     );
   };
@@ -962,9 +1254,10 @@ const Player = () => {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
+      transition={{ duration: 0.5 }}
       className="min-h-screen bg-background relative"
     >
-      <div className="fixed inset-0 bg-gradient-to-b from-background/95 to-background pointer-events-none" />
+      <div className="fixed inset-0 bg-gradient-to-b from-background/95 to-background pointer-events-none z-0" />
       
       <motion.nav
         initial={{ y: -100 }}
@@ -998,6 +1291,7 @@ const Player = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
           className="mt-6 space-y-6"
         >
           {/* Episode Navigation */}
@@ -1017,15 +1311,25 @@ const Player = () => {
                 <h3 className="text-lg font-medium text-white">Video Sources</h3>
                 <p className="text-sm text-white/60">Select your preferred streaming source</p>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-white/10 bg-white/5 backdrop-blur-sm hover:bg-white/10 transition-all duration-300"
-                onClick={goToDetails}
-              >
-                <ExternalLink className="h-4 w-4 mr-2" />
-                View Details
-              </Button>
+              <div className="flex space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-white/10 bg-white/5 backdrop-blur-sm hover:bg-white/10 transition-all duration-300"
+                  onClick={goToDetails}
+                >
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  View Details
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-white/10 bg-white/5 backdrop-blur-sm hover:bg-white/10 transition-all duration-300"
+                  onClick={() => setIsSettingsOpen(true)}
+                >
+                  More Settings
+                </Button>
+              </div>
             </div>
             <VideoSourceSelector
               videoSources={videoSources}
@@ -1033,11 +1337,14 @@ const Player = () => {
               onSourceChange={handleSourceChange}
             />
           </div>
-
-          {/* Collaboration Controls (After Video Player) */}
-          {renderCollaborationControls()}
         </motion.div>
       </div>
+
+      {/* Collaboration Overlay */}
+      {renderCollaborationControls()}
+
+      {/* Error Modal */}
+      {renderErrorModal()}
     </motion.div>
   );
 };
