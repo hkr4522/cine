@@ -44,6 +44,7 @@ const Player = () => {
     goBack
   } = useMediaPlayer(id, season, episode, type);
 
+  // Ensure template literal is closed properly
   const posterUrl = mediaDetails ? 
     `https://image.tmdb.org/t/p/w1280${mediaDetails.backdrop_path}` 
     : undefined;
@@ -53,11 +54,11 @@ const Player = () => {
   const [roomID, setRoomID] = useState<string | null>(null);
   const [roomPassword, setRoomPassword] = useState<string | null>(null);
   const [username, setUsername] = useState<string>(user?.username || 'Anonymous');
-  const [peers, setPeers] = useState<Map<string, any>>(new Map()); // Map of peer ID to connection objects
+  const [peers, setPeers] = useState<Map<string, any>>(new Map());
   const [dataChannels, setDataChannels] = useState<Map<string, RTCDataChannel>>(new Map());
   const [chatMessages, setChatMessages] = useState<{ sender: string; message: string; timestamp: number }[]>([]);
   const [isSharingScreen, setIsSharingScreen] = useState(false);
-  const [sharedStreams, setSharedStreams] = useState<Map<string, MediaStream>>(new Map()); // Remote streams
+  const [sharedStreams, setSharedStreams] = useState<Map<string, MediaStream>>(new Map());
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -75,7 +76,7 @@ const Player = () => {
   // Load PeerJS from CDN
   useEffect(() => {
     const script = document.createElement('script');
-    script.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'; // Assuming latest version as of 2025
+    script.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
     script.async = true;
     script.onload = () => {
       setIsPeerLoaded(true);
@@ -87,9 +88,7 @@ const Player = () => {
     document.body.appendChild(script);
 
     return () => {
-      if (script) {
-        document.body.removeChild(script);
-      }
+      document.body.removeChild(script);
       if (peerRef.current) {
         peerRef.current.destroy();
       }
@@ -102,12 +101,9 @@ const Player = () => {
   // Initialize Peer when loaded
   useEffect(() => {
     if (isPeerLoaded && !peerRef.current) {
-      // PeerJS is now available as window.Peer
       const Peer = (window as any).Peer;
-      const tempPeerID = crypto.randomUUID(); // Temporary ID for non-room users
-      peerRef.current = new Peer(tempPeerID, {
-        // Use default PeerJS cloud server for signaling
-      });
+      const tempPeerID = crypto.randomUUID();
+      peerRef.current = new Peer(tempPeerID);
 
       peerRef.current.on('open', (id: string) => {
         setMyPeerID(id);
@@ -147,10 +143,11 @@ const Player = () => {
     peerRef.current.on('open', (id: string) => {
       setMyPeerID(id);
       console.log('Room created with ID:', id);
+      // Ensure template literal is closed
       const roomURL = `${window.location.origin}${window.location.pathname}?room=${id}`;
       prompt('Share this URL with others:', roomURL);
 
-      // Set timeout to delete room after 6 hours (21600000 ms)
+      // Set timeout to delete room after 6 hours
       const timeout = setTimeout(() => {
         destroyRoom();
       }, 21600000);
@@ -184,9 +181,8 @@ const Player = () => {
 
     setRoomID(joinRoomID);
     setUsername(joinUsername);
-    setRoomPassword(password); // Temporarily store for verification
+    setRoomPassword(password);
 
-    // Connect to creator
     const conn = peerRef.current.connect(joinRoomID);
     conn.on('open', () => {
       conn.send({
@@ -199,7 +195,6 @@ const Player = () => {
 
     conn.on('data', (data: any) => {
       if (data.type === 'join-accepted') {
-        // Join successful, get peer list
         const existingPeers = data.peers || [];
         setPeers((prev) => {
           const newMap = new Map(prev);
@@ -228,7 +223,6 @@ const Player = () => {
     });
 
     conn.on('data', (data: any) => {
-      console.log('Received data:', data);
       if (data.type === 'join-request') {
         handleJoinRequest(conn, data);
       } else if (data.type === 'chat') {
@@ -276,13 +270,11 @@ const Player = () => {
     if (!isCreator) return;
 
     if (data.password === roomPassword) {
-      // Accept
       conn.send({
         type: 'join-accepted',
         peers: Array.from(peers.keys())
       });
 
-      // Broadcast new peer to existing peers
       broadcastToPeers({
         type: 'peer-list-update',
         peers: [data.peerID]
@@ -310,21 +302,18 @@ const Player = () => {
 
     addPeerConnection(peerID, conn);
 
-    // If voice enabled, call with audio
     if (isVoiceEnabled && localStream) {
       callPeerWithStream(peerID, localStream);
     }
 
-    // If sharing screen, call with screen stream
-    if (isSharingScreen && localStream) { // Assuming localStream includes screen if sharing
+    if (isSharingScreen && localStream) {
       callPeerWithStream(peerID, localStream);
     }
   };
 
   // Handle data from any peer
   const handleDataFromPeer = (data: any) => {
-    // Similar to handleIncomingDataConnection 'data' event, but centralized if needed
-    // For now, assume handled in incoming
+    // Centralized data handling if needed
   };
 
   // Add peer connection
@@ -372,12 +361,11 @@ const Player = () => {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
-        audio: true // If system audio
+        audio: true
       });
       setLocalStream(stream);
       setIsSharingScreen(true);
 
-      // Call all peers with stream
       peers.forEach((_, peerID) => {
         callPeerWithStream(peerID, stream);
       });
@@ -399,7 +387,6 @@ const Player = () => {
       setLocalStream(null);
     }
     setIsSharingScreen(false);
-    // Notify peers? Streams will close automatically
   };
 
   // Enable voice
@@ -415,7 +402,6 @@ const Player = () => {
       }
       setIsVoiceEnabled(true);
 
-      // Call peers with updated stream
       peers.forEach((_, peerID) => {
         callPeerWithStream(peerID, localStream!);
       });
@@ -436,16 +422,16 @@ const Player = () => {
   const callPeerWithStream = (peerID: string, stream: MediaStream) => {
     const call = peerRef.current.call(peerID, stream);
     call.on('stream', (remoteStream: MediaStream) => {
-      // If they send back? But for one-way share, maybe not
+      // Handle bidirectional streaming if needed
     });
     call.on('close', () => {
-      // Handle
+      // Cleanup
     });
   };
 
-  // Handle incoming call (media stream)
+  // Handle incoming call
   const handleIncomingCall = (call: any) => {
-    call.answer(null); // Answer without local stream, since receiving
+    call.answer(null);
 
     call.on('stream', (remoteStream: MediaStream) => {
       setSharedStreams((prev) => {
@@ -454,7 +440,6 @@ const Player = () => {
         return newMap;
       });
 
-      // Play audio if has audio
       if (remoteStream.getAudioTracks().length > 0) {
         const audio = new Audio();
         audio.srcObject = remoteStream;
@@ -493,7 +478,7 @@ const Player = () => {
     }
   };
 
-  // Request control of a peer's screen
+  // Request control
   const requestControl = (peerID: string) => {
     const conn = peers.get(peerID);
     if (conn) {
@@ -501,7 +486,7 @@ const Player = () => {
     }
   };
 
-  // Grant control to a requester
+  // Grant control
   const grantControl = (peerID: string) => {
     const conn = peers.get(peerID);
     if (conn) {
@@ -520,7 +505,6 @@ const Player = () => {
 
   // Handle remote control event
   const handleRemoteControlEvent = (eventData: any) => {
-    // Simulate event on document or specific element
     let event;
     switch (eventData.type) {
       case 'mousemove':
@@ -548,14 +532,13 @@ const Player = () => {
           cancelable: true
         });
         break;
-      // Add more event types as needed: mouseup, mousedown, keyup, etc.
       default:
         return;
     }
-    document.dispatchEvent(event); // Dispatch on document, assuming control over whole screen
+    document.dispatchEvent(event);
   };
 
-  // Capture local events and send if controlling
+  // Capture local events for control
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       sendControlEventToControlled({
@@ -580,7 +563,6 @@ const Player = () => {
       });
     };
 
-    // Add listeners if controlling any
     if (Array.from(isControlling.values()).some((v) => v)) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('click', handleClick);
@@ -594,7 +576,7 @@ const Player = () => {
     };
   }, [isControlling]);
 
-  // Send control event to all controlled peers
+  // Send control event to controlled peers
   const sendControlEventToControlled = (eventData: any) => {
     isControlling.forEach((isControl, peerID) => {
       if (isControl) {
@@ -609,7 +591,7 @@ const Player = () => {
     });
   };
 
-  // Destroy room (for creator)
+  // Destroy room
   const destroyRoom = () => {
     if (isCreator) {
       broadcastToPeers({ type: 'room-destroyed' });
@@ -627,7 +609,7 @@ const Player = () => {
     }
   };
 
-  // UI for remote streams
+  // Render shared screens
   const renderSharedScreens = () => {
     return Array.from(sharedStreams.entries()).map(([peerID, stream]) => {
       if (stream.getVideoTracks().length > 0) {
@@ -657,7 +639,7 @@ const Player = () => {
     });
   };
 
-  // UI for control requests (if sharing)
+  // Render control requests
   const renderControlRequests = () => {
     if (isSharingScreen && remoteControlRequests.length > 0) {
       return (
@@ -675,7 +657,7 @@ const Player = () => {
     return null;
   };
 
-  // Chat UI
+  // Render chat
   const renderChat = () => {
     if (isChatOpen) {
       return (
@@ -693,7 +675,7 @@ const Player = () => {
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && sendChat()}
-            className="w-full bg-transparent border-b"
+            className="w-full bg-transparent border-b" // Ensured quotes
           />
           <Button onClick={sendChat}>Send</Button>
         </div>
@@ -775,7 +757,6 @@ const Player = () => {
             />
           </div>
 
-          {/* New Collaboration Section */}
           <div className="space-y-4">
             <h3 className="text-lg font-medium text-white">Collaboration</h3>
             {!roomID ? (
@@ -806,4 +787,4 @@ const Player = () => {
   );
 };
 
-export default Player;```
+export default Player;
