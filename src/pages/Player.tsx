@@ -85,7 +85,7 @@ const Player = () => {
   const [roomTimeout, setRoomTimeout] = useState<NodeJS.Timeout | null>(null); // Room auto-deletion timer
   const [connectionStatus, setConnectionStatus] = useState<string>('Disconnected'); // Connection status
   const [errorMessage, setErrorMessage] = useState<string | null>(null); // General error message
-  const [serviceWorkerError, setServiceWorkerError] = useState<string | null>('Service worker failed to initialize: Cannot access \'A\' before initialization'); // Service worker error
+  const [serviceWorkerError, setServiceWorkerError] = useState<string | null>(null); // Service worker error
   const [connectionLogs, setConnectionLogs] = useState<string[]>([]); // Connection event logs
   const [isSettingsOpen, setIsSettingsOpen] = useState(false); // Party watch overlay visibility
   const [isLogsOpen, setIsLogsOpen] = useState(false); // Logs panel visibility
