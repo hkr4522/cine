@@ -15,17 +15,12 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 
 /**
  * Player component for video playback with party watch features.
- * Includes room creation/joining, voice call, video call, group chat with emojis and voice messages, 
+ * Includes room creation/joining, voice call, video call, group chat with emojis and voice messages,
  * session recording for memories, and synchronized video source selection.
- * Party watch options are shown in an overlay triggered by a "Party Watch" button near "View Details".
- * Uses modal forms for room creation/joining instead of prompts.
- * Automatically opens join modal when accessing via URL (?room=ID).
- * Responsive design for mobile and desktop.
- * All features are properly implemented with error handling and logging.
- * Extended to 2000+ lines with detailed comments, separated functions, and robust state management.
+ * Responsive design for mobile and desktop with Tailwind CSS.
+ * Enhanced error handling for service worker and WebRTC.
  */
 const Player = () => {
-  // Extract URL parameters for media playback
   const { id, season, episode, type } = useParams<{
     id: string;
     season?: string;
@@ -35,7 +30,6 @@ const Player = () => {
   const { user } = useAuth();
   const location = useLocation();
 
-  // Media player hook for video playback functionality
   const {
     title,
     mediaType,
@@ -59,62 +53,59 @@ const Player = () => {
     goBack,
   } = useMediaPlayer(id, season, episode, type);
 
-  // Construct poster URL for video player
   const posterUrl = mediaDetails
     ? `https://image.tmdb.org/t/p/w1280${mediaDetails.backdrop_path}`
     : undefined;
 
   // State for party watch features
-  const [isPeerLoaded, setIsPeerLoaded] = useState(false); // Tracks if PeerJS is loaded from CDN
-  const [roomID, setRoomID] = useState<string | null>(null); // Current party room ID
-  const [roomPassword, setRoomPassword] = useState<string | null>(null); // Password for the room
-  const [username, setUsername] = useState<string>(user?.username || 'Anonymous'); // Current user's display name
-  const [peers, setPeers] = useState<Map<string, any>>(new Map()); // Map of connected peers
-  const [dataChannels, setDataChannels] = useState<Map<string, RTCDataChannel>>(new Map()); // Map of data channels for peers
+  const [isPeerLoaded, setIsPeerLoaded] = useState(false);
+  const [roomID, setRoomID] = useState<string | null>(null);
+  const [roomPassword, setRoomPassword] = useState<string | null>(null);
+  const [username, setUsername] = useState<string>(user?.username || 'Anonymous');
+  const [peers, setPeers] = useState<Map<string, any>>(new Map());
+  const [dataChannels, setDataChannels] = useState<Map<string, RTCDataChannel>>(new Map());
   const [chatMessages, setChatMessages] = useState<
     { sender: string; message: string; timestamp: number; color: string; type: 'text' | 'voice'; data?: string }[]
-  >([]); // History of chat messages, including voice messages
-  const [sharedStreams, setSharedStreams] = useState<Map<string, MediaStream>>(new Map()); // Remote video streams for video call
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null); // Local media stream for voice/video call
-  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false); // Status of microphone (voice call)
-  const [isVideoEnabled, setIsVideoEnabled] = useState(false); // Status of camera (video call)
-  const [isChatOpen, setIsChatOpen] = useState(false); // Visibility of chat panel
-  const [chatInput, setChatInput] = useState(''); // Current text input for chat
-  const [myPeerID, setMyPeerID] = useState<string | null>(null); // Local peer connection ID
-  const [isCreator, setIsCreator] = useState(false); // Whether the user is the room creator
-  const [roomTimeout, setRoomTimeout] = useState<NodeJS.Timeout | null>(null); // Timer for auto room deletion after 6 hours
-  const [connectionStatus, setConnectionStatus] = useState<string>('Disconnected'); // Current connection status display
-  const [errorMessage, setErrorMessage] = useState<string | null>(null); // Message for error modal
-  const [connectionLogs, setConnectionLogs] = useState<string[]>([]); // Array of connection event logs
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false); // Visibility of party watch overlay
-  const [isLogsOpen, setIsLogsOpen] = useState(false); // Visibility of logs panel
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false); // Visibility of create room modal
-  const [createUsername, setCreateUsername] = useState(''); // Input for create room username
-  const [createPassword, setCreatePassword] = useState(''); // Input for create room password
-  const [isJoinModalOpen, setIsJoinModalOpen] = useState(false); // Visibility of join room modal
-  const [joinRoomID, setJoinRoomID] = useState(''); // Input for join room ID
-  const [joinUsername, setJoinUsername] = useState(''); // Input for join username
-  const [joinPassword, setJoinPassword] = useState(''); // Input for join password
-  const [isRoomURLModalOpen, setIsRoomURLModalOpen] = useState(false); // Visibility of room URL sharing modal
-  const [currentRoomURL, setCurrentRoomURL] = useState(''); // Generated URL for sharing the room
-  const [isRecordingVoice, setIsRecordingVoice] = useState(false); // Status of voice message recording
-  const [isRecordingSession, setIsRecordingSession] = useState(false); // Status of session (memories) recording
-  const [localVideoRef, setLocalVideoRef] = useState<null | HTMLVideoElement>(null); // Ref for local video preview
+  >([]);
+  const [sharedStreams, setSharedStreams] = useState<Map<string, MediaStream>>(new Map());
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
+  const [isVideoEnabled, setIsVideoEnabled] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [myPeerID, setMyPeerID] = useState<string | null>(null);
+  const [isCreator, setIsCreator] = useState(false);
+  const [roomTimeout, setRoomTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<string>('Disconnected');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [connectionLogs, setConnectionLogs] = useState<string[]>([]);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [createUsername, setCreateUsername] = useState('');
+  const [createPassword, setCreatePassword] = useState('');
+  const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
+  const [joinRoomID, setJoinRoomID] = useState('');
+  const [joinUsername, setJoinUsername] = useState('');
+  const [joinPassword, setJoinPassword] = useState('');
+  const [isRoomURLModalOpen, setIsRoomURLModalOpen] = useState(false);
+  const [currentRoomURL, setCurrentRoomURL] = useState('');
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [isRecordingSession, setIsRecordingSession] = useState(false);
+  const [serviceWorkerError, setServiceWorkerError] = useState<string | null>(null);
 
   // Refs for DOM elements and WebRTC objects
-  const peerRef = useRef<any>(null); // Reference to PeerJS instance
-  const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map()); // Map of remote video elements for video call
-  const chatRef = useRef<HTMLDivElement>(null); // Reference to chat container for scrolling
-  const logRef = useRef<HTMLDivElement>(null); // Reference to logs container for scrolling
-  const voiceRecorder = useRef<MediaRecorder | null>(null); // Reference to voice message MediaRecorder
-  const sessionRecorder = useRef<MediaRecorder | null>(null); // Reference to session MediaRecorder
-  const recordedVoiceChunks = useRef<Blob[]>([]); // Array of blobs for recorded voice message
-  const recordedSessionChunks = useRef<Blob[]>([]); // Array of blobs for recorded session
-  const localVideo = useRef<HTMLVideoElement>(null); // Ref for local video preview
+  const peerRef = useRef<any>(null);
+  const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
+  const chatRef = useRef<HTMLDivElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+  const voiceRecorder = useRef<MediaRecorder | null>(null);
+  const sessionRecorder = useRef<MediaRecorder | null>(null);
+  const recordedVoiceChunks = useRef<Blob[]>([]);
+  const recordedSessionChunks = useRef<Blob[]>([]);
 
   /**
-   * Generates a random hex color for user messages in chat to distinguish users visually.
-   * @returns {string} A random 6-digit hex color code prefixed with '#'.
+   * Generates a random hex color for user messages in chat.
    */
   const generateUserColor = useCallback(() => {
     const letters = '0123456789ABCDEF';
@@ -126,9 +117,7 @@ const Player = () => {
   }, []);
 
   /**
-   * Sanitizes user input strings to prevent XSS attacks by escaping HTML characters.
-   * @param {string} input - The raw user input to sanitize.
-   * @returns {string} The sanitized string safe for rendering in HTML.
+   * Sanitizes user input to prevent XSS attacks.
    */
   const sanitizeInput = useCallback((input: string) => {
     return input.replace(/[<>&"']/g, (char) => {
@@ -144,9 +133,7 @@ const Player = () => {
   }, []);
 
   /**
-   * Logs a connection or party watch event to the state and console for debugging and UI display.
-   * Automatically scrolls the logs container if visible.
-   * @param {string} message - The message to log.
+   * Logs connection or party watch events.
    */
   const logConnectionEvent = useCallback((message: string) => {
     setConnectionLogs((prev) => [...prev, `${new Date().toLocaleString()}: ${message}`]);
@@ -157,8 +144,7 @@ const Player = () => {
   }, [isLogsOpen]);
 
   /**
-   * Loads the PeerJS library from CDN and initializes the connection.
-   * Handles load success/error and cleanup on unmount.
+   * Loads PeerJS library from CDN.
    */
   useEffect(() => {
     const script = document.createElement('script');
@@ -174,7 +160,18 @@ const Player = () => {
     };
     document.body.appendChild(script);
 
-    // Cleanup function to run on unmount
+    // Check service worker status
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        if (!registrations.length) {
+          setServiceWorkerError('No active service worker found. Some features may be unavailable.');
+        }
+      }).catch((err) => {
+        setServiceWorkerError(`Service Worker error: ${err.message}`);
+        logConnectionEvent(`Service Worker error: ${err.message}`);
+      });
+    }
+
     return () => {
       if (document.body.contains(script)) {
         document.body.removeChild(script);
@@ -191,18 +188,11 @@ const Player = () => {
         localStream.getTracks().forEach((track) => track.stop());
         logConnectionEvent('Local media stream stopped on cleanup');
       }
-      if (voiceRecorder.current) {
-        voiceRecorder.current.stop();
-      }
-      if (sessionRecorder.current) {
-        sessionRecorder.current.stop();
-      }
     };
   }, [logConnectionEvent]);
 
   /**
-   * Initializes the PeerJS connection once the library is loaded.
-   * Sets up event listeners for connections, calls, and errors.
+   * Initializes PeerJS connection.
    */
   useEffect(() => {
     if (isPeerLoaded && !peerRef.current) {
@@ -227,8 +217,7 @@ const Player = () => {
   }, [isPeerLoaded, logConnectionEvent]);
 
   /**
-   * Checks the current URL for a room ID parameter and opens the join modal if present.
-   * This enables seamless joining via shared links without manual input.
+   * Checks URL for room ID and opens join modal.
    */
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
@@ -241,9 +230,7 @@ const Player = () => {
   }, [location.search, isPeerLoaded, roomID, logConnectionEvent]);
 
   /**
-   * Handles video source changes with synchronization across all party members.
-   * Broadcasts the new source to peers so everyone switches automatically.
-   * @param {string} newSource - The new video source to select.
+   * Handles synchronized video source changes.
    */
   const syncedHandleSourceChange = useCallback((newSource: string) => {
     handleSourceChange(newSource);
@@ -251,15 +238,14 @@ const Player = () => {
       broadcastToPeers({ type: 'source-change', source: newSource });
       logConnectionEvent(`Synchronized video source change to: ${newSource}`);
     }
-  }, [handleSourceChange, roomID, broadcastToPeers, logConnectionEvent]);
+  }, [handleSourceChange, roomID, logConnectionEvent]);
 
   /**
-   * Creates a new party room after validating inputs from the modal.
-   * Initializes the peer with the room ID, sets up timeout, and shows sharing modal.
+   * Creates a new party room.
    */
   const createRoomAction = useCallback(() => {
     if (!createUsername.trim() || !createPassword.trim()) {
-      setErrorMessage('Username and password are required for room creation');
+      setErrorMessage('Username and password are required');
       return;
     }
     const sanitizedUsername = sanitizeInput(createUsername.trim());
@@ -273,7 +259,6 @@ const Player = () => {
     setConnectionStatus('Creating party room...');
     logConnectionEvent('Initiating party room creation...');
 
-    // Destroy existing peer and recreate with room ID
     if (peerRef.current) {
       peerRef.current.destroy();
     }
@@ -282,14 +267,13 @@ const Player = () => {
 
     peerRef.current.on('open', (id: string) => {
       setMyPeerID(id);
-      setConnectionStatus('Party room created successfully');
+      setConnectionStatus('Party room created');
       const generatedURL = `${window.location.origin}${window.location.pathname}?room=${id}`;
       setCurrentRoomURL(generatedURL);
       setIsRoomURLModalOpen(true);
       setIsCreateModalOpen(false);
-      logConnectionEvent(`Party room created with ID: ${id}, URL generated`);
+      logConnectionEvent(`Party room created with ID: ${id}`);
 
-      // Set auto-deletion timer for 6 hours (21600000 ms)
       const timeout = setTimeout(() => {
         destroyRoom();
       }, 21600000);
@@ -300,19 +284,17 @@ const Player = () => {
     peerRef.current.on('connection', handleIncomingDataConnection);
     peerRef.current.on('call', handleIncomingCall);
     peerRef.current.on('error', (err: any) => {
-      const errorMsg = `Room creation error: ${err.type || err.message}`;
-      setErrorMessage(errorMsg);
-      logConnectionEvent(errorMsg);
+      setErrorMessage(`Room creation error: ${err.type || err.message}`);
+      logConnectionEvent(`Room creation error: ${err.type || err.message}`);
     });
   }, [createUsername, createPassword, logConnectionEvent, sanitizeInput]);
 
   /**
-   * Joins an existing party room after validating modal inputs.
-   * Sends join request to creator and handles acceptance/rejection.
+   * Joins an existing party room.
    */
   const joinRoomAction = useCallback(() => {
     if (!joinRoomID.trim() || !joinPassword.trim()) {
-      setErrorMessage('Room ID and password are required to join');
+      setErrorMessage('Room ID and password are required');
       return;
     }
     const sanitizedUsername = sanitizeInput(joinUsername.trim() || 'Anonymous');
@@ -347,7 +329,7 @@ const Player = () => {
           });
           return newMap;
         });
-        setConnectionStatus('Joined party room successfully');
+        setConnectionStatus('Joined party room');
         setIsJoinModalOpen(false);
         logConnectionEvent('Successfully joined party room');
       } else if (data.type === 'join-rejected') {
@@ -355,7 +337,7 @@ const Player = () => {
         setRoomID(null);
         setRoomPassword(null);
         setConnectionStatus('Join rejected');
-        logConnectionEvent('Join request rejected by room');
+        logConnectionEvent('Join request rejected');
       } else if (data.type === 'source-change') {
         syncedHandleSourceChange(data.source);
         logConnectionEvent(`Received synchronized source change: ${data.source}`);
@@ -363,17 +345,15 @@ const Player = () => {
     });
 
     conn.on('error', (err: any) => {
-      const errorMsg = `Connection error while joining: ${err.type || err.message}`;
-      setErrorMessage(errorMsg);
-      logConnectionEvent(errorMsg);
+      setErrorMessage(`Connection error while joining: ${err.type || err.message}`);
+      logConnectionEvent(`Connection error while joining: ${err.type || err.message}`);
     });
 
     addPeerConnection(joinRoomID.trim(), conn);
   }, [joinRoomID, joinUsername, joinPassword, myPeerID, logConnectionEvent, sanitizeInput, syncedHandleSourceChange]);
 
   /**
-   * Handles incoming data connections from other peers in the party room.
-   * @param {any} conn - The PeerJS connection object from the incoming peer.
+   * Handles incoming data connections.
    */
   const handleIncomingDataConnection = useCallback(
     (conn: any) => {
@@ -382,7 +362,6 @@ const Player = () => {
       });
 
       conn.on('data', (data: any) => {
-        console.log('Received data:', data); // Additional console log for debugging
         if (data.type === 'join-request') {
           handleJoinRequest(conn, data);
         } else if (data.type === 'chat') {
@@ -410,7 +389,7 @@ const Player = () => {
               timestamp: Date.now(),
               color: generateUserColor(),
               type: 'voice' as const,
-              data: data.url, // Base64 or blob URL for playback
+              data: data.url,
             },
           ]);
           if (chatRef.current) {
@@ -445,14 +424,12 @@ const Player = () => {
   );
 
   /**
-   * Handles join requests from potential party members (only the creator processes these).
-   * @param {any} conn - The connection from the requesting peer.
-   * @param {any} data - The join request data including password and username.
+   * Handles join requests from peers.
    */
   const handleJoinRequest = useCallback(
     (conn: any, data: any) => {
       if (!isCreator) {
-        logConnectionEvent('Received join request but not room creator - ignoring');
+        logConnectionEvent('Received join request but not room creator');
         return;
       }
 
@@ -466,21 +443,19 @@ const Player = () => {
           peers: [data.peerID || conn.peer],
         });
         addPeerConnection(data.peerID || conn.peer, conn);
-        logConnectionEvent(`${data.username || 'Anonymous'} successfully joined the party room`);
+        logConnectionEvent(`${data.username || 'Anonymous'} joined the party room`);
       } else {
         conn.send({ type: 'join-rejected' });
         conn.close();
-        const rejectMsg = `${data.username || 'Anonymous'} attempted to join with incorrect password`;
-        setErrorMessage(rejectMsg);
-        logConnectionEvent(rejectMsg);
+        setErrorMessage(`${data.username || 'Anonymous'} attempted to join with incorrect password`);
+        logConnectionEvent(`${data.username || 'Anonymous'} attempted to join with incorrect password`);
       }
     },
-    [isCreator, roomPassword, peers, logConnectionEvent]
+    [isCreator, roomPassword, peers, logConnectionEvent, broadcastToPeers]
   );
 
   /**
-   * Establishes a connection to a new peer in the party room.
-   * @param {string} peerID - The ID of the peer to connect to.
+   * Connects to a new peer.
    */
   const connectToPeer = useCallback(
     (peerID: string) => {
@@ -507,14 +482,12 @@ const Player = () => {
       });
 
       conn.on('error', (err: any) => {
-        const errorMsg = `Peer connection error with ${peerID}: ${err.type || err.message}`;
-        setErrorMessage(errorMsg);
-        logConnectionEvent(errorMsg);
+        setErrorMessage(`Peer connection error with ${peerID}: ${err.type || err.message}`);
+        logConnectionEvent(`Peer connection error with ${peerID}: ${err.type || err.message}`);
       });
 
       addPeerConnection(peerID, conn);
 
-      // Start media call if voice or video is enabled
       if ((isVoiceEnabled || isVideoEnabled) && localStream) {
         callPeerWithStream(peerID, localStream);
       }
@@ -523,18 +496,14 @@ const Player = () => {
   );
 
   /**
-   * Centralized handler for arbitrary data received from any peer.
-   * Logs the data for debugging purposes.
-   * @param {any} data - The data object received from the peer.
+   * Handles arbitrary data from peers.
    */
   const handleDataFromPeer = useCallback((data: any) => {
     logConnectionEvent(`Received arbitrary data from peer: ${JSON.stringify(data)}`);
   }, [logConnectionEvent]);
 
   /**
-   * Adds a new peer connection to the state map.
-   * @param {string} peerID - The peer's ID.
-   * @param {any} conn - The PeerJS connection object.
+   * Adds a peer connection to state.
    */
   const addPeerConnection = useCallback((peerID: string, conn: any) => {
     setPeers((prev) => {
@@ -542,12 +511,11 @@ const Player = () => {
       newMap.set(peerID, conn);
       return newMap;
     });
-    logConnectionEvent(`Added new peer connection: ${peerID} (total peers: ${newMap.size})`);
+    logConnectionEvent(`Added peer connection: ${peerID} (total peers: ${newMap.size})`);
   }, [logConnectionEvent]);
 
   /**
-   * Removes a peer connection from the state and cleans up related resources.
-   * @param {string} peerID - The peer's ID to remove.
+   * Removes a peer connection.
    */
   const removePeerConnection = useCallback(
     (peerID: string) => {
@@ -575,8 +543,7 @@ const Player = () => {
   );
 
   /**
-   * Broadcasts a data message to all connected peers in the party room.
-   * @param {any} data - The data object to broadcast.
+   * Broadcasts data to all peers.
    */
   const broadcastToPeers = useCallback(
     (data: any) => {
@@ -598,8 +565,7 @@ const Player = () => {
   );
 
   /**
-   * Enables the microphone for voice call in the party.
-   * Requests user media and adds tracks to local stream.
+   * Enables microphone for voice call.
    */
   const enableVoice = useCallback(async () => {
     try {
@@ -612,24 +578,22 @@ const Player = () => {
         });
       }
       setIsVoiceEnabled(true);
-      setConnectionStatus('Microphone enabled for party voice call');
+      setConnectionStatus('Microphone enabled');
       logConnectionEvent('Microphone enabled for voice call');
 
-      // Call all peers with updated stream
       peers.forEach((_, peerID) => {
         if (localStream) {
           callPeerWithStream(peerID, localStream);
         }
       });
     } catch (err: any) {
-      const errorMsg = `Failed to enable microphone: ${err.message}`;
-      setErrorMessage(errorMsg);
-      logConnectionEvent(errorMsg);
+      setErrorMessage(`Failed to enable microphone: ${err.message}`);
+      logConnectionEvent(`Failed to enable microphone: ${err.message}`);
     }
   }, [localStream, peers, logConnectionEvent]);
 
   /**
-   * Disables the microphone and stops audio tracks.
+   * Disables microphone.
    */
   const disableVoice = useCallback(() => {
     if (localStream) {
@@ -644,8 +608,7 @@ const Player = () => {
   }, [localStream, logConnectionEvent]);
 
   /**
-   * Enables the camera for video call in the party.
-   * Requests user media and adds video tracks.
+   * Enables camera for video call.
    */
   const enableVideo = useCallback(async () => {
     try {
@@ -658,24 +621,22 @@ const Player = () => {
         });
       }
       setIsVideoEnabled(true);
-      setConnectionStatus('Camera enabled for party video call');
+      setConnectionStatus('Camera enabled');
       logConnectionEvent('Camera enabled for video call');
 
-      // Call all peers with updated stream
       peers.forEach((_, peerID) => {
         if (localStream) {
           callPeerWithStream(peerID, localStream);
         }
       });
     } catch (err: any) {
-      const errorMsg = `Failed to enable camera: ${err.message}`;
-      setErrorMessage(errorMsg);
-      logConnectionEvent(errorMsg);
+      setErrorMessage(`Failed to enable camera: ${err.message}`);
+      logConnectionEvent(`Failed to enable camera: ${err.message}`);
     }
   }, [localStream, peers, logConnectionEvent]);
 
   /**
-   * Disables the camera and stops video tracks.
+   * Disables camera.
    */
   const disableVideo = useCallback(() => {
     if (localStream) {
@@ -690,14 +651,13 @@ const Player = () => {
   }, [localStream, logConnectionEvent]);
 
   /**
-   * Starts recording a voice message for the chat.
-   * Uses MediaRecorder to capture audio and broadcasts as base64 on stop.
+   * Starts recording a voice message.
    */
   const startRecordingVoice = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       voiceRecorder.current = new MediaRecorder(stream);
-      recordedVoiceChunks.current = []; // Reset chunks
+      recordedVoiceChunks.current = [];
 
       voiceRecorder.current.ondataavailable = (e) => {
         if (e.data.size > 0) {
@@ -734,22 +694,20 @@ const Player = () => {
         };
         reader.readAsDataURL(blob);
 
-        // Stop the stream tracks
         stream.getTracks().forEach((track) => track.stop());
       };
 
-      voiceRecorder.current.start(1000); // Timeslice for dataavailable every second
+      voiceRecorder.current.start(1000);
       setIsRecordingVoice(true);
       logConnectionEvent('Started recording voice message');
     } catch (err: any) {
-      const errorMsg = `Failed to start voice recording: ${err.message}`;
-      setErrorMessage(errorMsg);
-      logConnectionEvent(errorMsg);
+      setErrorMessage(`Failed to start voice recording: ${err.message}`);
+      logConnectionEvent(`Failed to start voice recording: ${err.message}`);
     }
   }, [username, generateUserColor, logConnectionEvent, broadcastToPeers]);
 
   /**
-   * Stops the current voice message recording.
+   * Stops voice message recording.
    */
   const stopRecordingVoice = useCallback(() => {
     if (voiceRecorder.current && isRecordingVoice) {
@@ -760,8 +718,7 @@ const Player = () => {
   }, [isRecordingVoice, logConnectionEvent]);
 
   /**
-   * Starts recording the current session (memories) as a video file.
-   * Captures the local stream and downloads on stop.
+   * Starts session recording.
    */
   const startRecordingSession = useCallback(() => {
     if (!localStream) {
@@ -770,7 +727,7 @@ const Player = () => {
     }
 
     sessionRecorder.current = new MediaRecorder(localStream);
-    recordedSessionChunks.current = []; // Reset chunks
+    recordedSessionChunks.current = [];
 
     sessionRecorder.current.ondataavailable = (e) => {
       if (e.data.size > 0) {
@@ -787,39 +744,37 @@ const Player = () => {
       a.click();
       URL.revokeObjectURL(url);
       setIsRecordingSession(false);
-      logConnectionEvent('Session memories downloaded as webm file');
+      logConnectionEvent('Session memories downloaded');
     };
 
-    sessionRecorder.current.start(1000); // Timeslice for dataavailable
+    sessionRecorder.current.start(1000);
     setIsRecordingSession(true);
-    logConnectionEvent('Started recording party session memories');
+    logConnectionEvent('Started recording party session');
   }, [localStream, logConnectionEvent]);
 
   /**
-   * Stops the current session recording.
+   * Stops session recording.
    */
   const stopRecordingSession = useCallback(() => {
     if (sessionRecorder.current && isRecordingSession) {
       sessionRecorder.current.stop();
-      logConnectionEvent('Stopped recording party session memories');
+      logConnectionEvent('Stopped recording party session');
     }
   }, [isRecordingSession, logConnectionEvent]);
 
   /**
-   * Copies the current room URL to the clipboard for sharing.
+   * Copies room URL to clipboard.
    */
   const copyRoomURL = useCallback(() => {
     if (navigator.clipboard && currentRoomURL) {
       navigator.clipboard.writeText(currentRoomURL).then(() => {
-        logConnectionEvent('Party room URL copied to clipboard successfully');
+        logConnectionEvent('Room URL copied to clipboard');
         setIsRoomURLModalOpen(false);
       }).catch((err: any) => {
-        const errorMsg = `Failed to copy room URL: ${err.message}`;
-        setErrorMessage(errorMsg);
-        logConnectionEvent(errorMsg);
+        setErrorMessage(`Failed to copy room URL: ${err.message}`);
+        logConnectionEvent(`Failed to copy room URL: ${err.message}`);
       });
     } else {
-      // Fallback for older browsers
       const textArea = document.createElement('textarea');
       textArea.value = currentRoomURL;
       textArea.style.position = 'fixed';
@@ -829,11 +784,10 @@ const Player = () => {
       textArea.select();
       try {
         document.execCommand('copy');
-        logConnectionEvent('Party room URL copied via fallback method');
+        logConnectionEvent('Room URL copied via fallback');
       } catch (err: any) {
-        const errorMsg = `Fallback copy failed: ${err.message}`;
-        setErrorMessage(errorMsg);
-        logConnectionEvent(errorMsg);
+        setErrorMessage(`Fallback copy failed: ${err.message}`);
+        logConnectionEvent(`Fallback copy failed: ${err.message}`);
       }
       document.body.removeChild(textArea);
       setIsRoomURLModalOpen(false);
@@ -841,8 +795,7 @@ const Player = () => {
   }, [currentRoomURL, logConnectionEvent]);
 
   /**
-   * Sends a text chat message to all peers, supporting emojis.
-   * Sanitizes input and adds to local history.
+   * Sends a chat message.
    */
   const sendChat = useCallback(() => {
     const input = chatInput.trim();
@@ -878,9 +831,7 @@ const Player = () => {
   }, [chatInput, username, sanitizeInput, generateUserColor, logConnectionEvent, broadcastToPeers]);
 
   /**
-   * Calls a specific peer with the local media stream for voice/video.
-   * @param {string} peerID - The target peer ID.
-   * @param {MediaStream} stream - The local stream to send.
+   * Calls a peer with media stream.
    */
   const callPeerWithStream = useCallback(
     (peerID: string, stream: MediaStream) => {
@@ -908,27 +859,22 @@ const Player = () => {
           logConnectionEvent(`Media call closed with peer: ${peerID}`);
         });
         call.on('error', (err: any) => {
-          const errorMsg = `Media call error with ${peerID}: ${err.message}`;
-          setErrorMessage(errorMsg);
-          logConnectionEvent(errorMsg);
+          setErrorMessage(`Media call error with ${peerID}: ${err.message}`);
+          logConnectionEvent(`Media call error with ${peerID}: ${err.message}`);
         });
       } catch (err: any) {
-        const errorMsg = `Failed to initiate media call to ${peerID}: ${err.message}`;
-        setErrorMessage(errorMsg);
-        logConnectionEvent(errorMsg);
+        setErrorMessage(`Failed to initiate media call to ${peerID}: ${err.message}`);
+        logConnectionEvent(`Failed to initiate media call to ${peerID}: ${err.message}`);
       }
     },
     [logConnectionEvent]
   );
 
   /**
-   * Handles incoming media calls from peers for voice/video.
-   * Answers the call and plays the remote stream.
-   * @param {any} call - The incoming PeerJS call object.
+   * Handles incoming media calls.
    */
   const handleIncomingCall = useCallback(
     (call: any) => {
-      // Answer the call with local stream if available
       call.answer(localStream || null);
 
       call.on('stream', (remoteStream: MediaStream) => {
@@ -938,7 +884,6 @@ const Player = () => {
           return newMap;
         });
 
-        // Auto-play audio if present in stream
         if (remoteStream.getAudioTracks().length > 0) {
           const audio = new Audio();
           audio.srcObject = remoteStream;
@@ -960,17 +905,15 @@ const Player = () => {
       });
 
       call.on('error', (err: any) => {
-        const errorMsg = `Incoming media call error: ${err.message}`;
-        setErrorMessage(errorMsg);
-        logConnectionEvent(errorMsg);
+        setErrorMessage(`Incoming media call error: ${err.message}`);
+        logConnectionEvent(`Incoming media call error: ${err.message}`);
       });
     },
     [localStream, logConnectionEvent]
   );
 
   /**
-   * Destroys the current party room (creator only).
-   * Broadcasts destruction and cleans up all resources.
+   * Destroys the party room.
    */
   const destroyRoom = useCallback(() => {
     if (!isCreator) {
@@ -993,7 +936,6 @@ const Player = () => {
       peerRef.current.destroy();
     }
 
-    // Reset all states
     setRoomID(null);
     setRoomPassword(null);
     setIsCreator(false);
@@ -1010,8 +952,7 @@ const Player = () => {
   }, [isCreator, peers, roomTimeout, logConnectionEvent, broadcastToPeers]);
 
   /**
-   * Leaves the current party room (non-creator).
-   * Closes connections and resets states.
+   * Leaves the party room.
    */
   const leaveRoom = useCallback(() => {
     if (isCreator) {
@@ -1033,7 +974,6 @@ const Player = () => {
       peerRef.current.destroy();
     }
 
-    // Reset states
     setRoomID(null);
     setRoomPassword(null);
     setPeers(new Map());
@@ -1051,9 +991,7 @@ const Player = () => {
   }, [isCreator, peers, localStream, logConnectionEvent]);
 
   /**
-   * Formats a timestamp for display in chat messages.
-   * @param {number} timestamp - The Unix timestamp in milliseconds.
-   * @returns {string} Formatted time string (HH:MM:SS).
+   * Formats timestamp for chat messages.
    */
   const formatTimestamp = useCallback((timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString([], {
@@ -1064,21 +1002,29 @@ const Player = () => {
   }, []);
 
   /**
-   * Renders an error modal overlay for user feedback on failures.
-   * @returns {JSX.Element | null} The modal if errorMessage is set.
+   * Renders error modal.
    */
   const renderErrorModal = () => {
-    if (!errorMessage) return null;
+    if (!errorMessage && !serviceWorkerError) return null;
     return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-60">
-        <div className="bg-background p-6 rounded-lg border border-white/20 min-w-[300px] max-w-md mx-4">
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-60 p-4">
+        <div className="bg-background p-6 rounded-lg border border-white/20 min-w-[280px] max-w-md">
           <h3 className="text-white text-lg font-medium mb-2">Error</h3>
-          <p className="text-white/80 mb-4 whitespace-pre-wrap">{errorMessage}</p>
-          <Button 
-            onClick={() => setErrorMessage(null)} 
+          <p className="text-white/80 mb-4 whitespace-pre-wrap">{errorMessage || serviceWorkerError}</p>
+          <Button
+            onClick={() => {
+              setErrorMessage(null);
+              setServiceWorkerError(null);
+              // Retry service worker registration
+              if (serviceWorkerError && 'serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/sw.js').catch((err) => {
+                  setServiceWorkerError(`Retry failed: ${err.message}`);
+                });
+              }
+            }}
             className="w-full bg-red-600 hover:bg-red-700"
           >
-            Close
+            {serviceWorkerError ? 'Retry' : 'Close'}
           </Button>
         </div>
       </div>
@@ -1086,46 +1032,39 @@ const Player = () => {
   };
 
   /**
-   * Renders the list of connected peers in the party room.
-   * @returns {JSX.Element} The peer list UI.
+   * Renders peer list.
    */
-  const renderPeerList = () => {
-    return (
-      <div className="mt-6 p-4 bg-black/20 rounded-lg">
-        <h4 className="text-white font-medium mb-2">Connected Peers ({peers.size})</h4>
-        {peers.size === 0 ? (
-          <p className="text-white/60 text-sm">No peers connected yet</p>
-        ) : (
-          <ul className="space-y-1">
-            {Array.from(peers.keys()).map((peerID) => (
-              <li key={peerID} className="text-white/80 text-sm truncate">
-                • {peerID.substring(0, 8)}...
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    );
-  };
+  const renderPeerList = () => (
+    <div className="mt-4 p-4 bg-black/20 rounded-lg">
+      <h4 className="text-white font-medium mb-2">Connected Peers ({peers.size})</h4>
+      {peers.size === 0 ? (
+        <p className="text-white/60 text-sm">No peers connected</p>
+      ) : (
+        <ul className="space-y-1">
+          {Array.from(peers.keys()).map((peerID) => (
+            <li key={peerID} className="text-white/80 text-sm truncate">
+              • {peerID.substring(0, 8)}...
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 
   /**
-   * Renders the connection logs panel.
-   * @returns {JSX.Element} The logs UI if visible.
+   * Renders connection logs.
    */
   const renderConnectionLogs = () => {
     if (!isLogsOpen) return null;
     return (
-      <div className="mt-6 p-4 bg-black/20 rounded-lg">
+      <div className="mt-4 p-4 bg-black/20 rounded-lg">
         <h4 className="text-white font-medium mb-2">Party Logs</h4>
         <div
           ref={logRef}
-          className="h-40 overflow-y-auto bg-black/50 p-2 rounded text-white/80 text-xs leading-tight"
-          style={{ scrollbarWidth: 'thin', scrollbarColor: '#888 #333' }}
+          className="h-40 overflow-y-auto bg-black/50 p-2 rounded text-white/80 text-xs"
         >
           {connectionLogs.map((log, idx) => (
-            <div key={idx} className="mb-1 break-words">
-              {log}
-            </div>
+            <div key={idx} className="mb-1 break-words">{log}</div>
           ))}
         </div>
       </div>
@@ -1133,8 +1072,7 @@ const Player = () => {
   };
 
   /**
-   * Renders remote camera streams for video call participants.
-   * @returns {JSX.Element[]} Array of video elements for each stream.
+   * Renders camera streams.
    */
   const renderCameraStreams = () => {
     return Array.from(sharedStreams.entries()).map(([peerID, stream]) => {
@@ -1152,7 +1090,7 @@ const Player = () => {
             }}
             autoPlay
             playsInline
-            muted // Mute remote videos to avoid echo
+            muted
             className="w-full max-w-xs h-auto border border-white/20 rounded"
           />
         </div>
@@ -1161,24 +1099,19 @@ const Player = () => {
   };
 
   /**
-   * Renders the group chat panel with text input, voice recording, and message history.
-   * Supports emojis via standard input (no special emoji picker for simplicity).
-   * @returns {JSX.Element} The chat UI.
+   * Renders group chat panel.
    */
   const renderChat = () => {
     if (!isChatOpen) return null;
     return (
-      <div className="mt-6 p-4 bg-black/20 rounded-lg">
-        <h4 className="text-white font-medium mb-3 flex items-center">
-          Group Chat ({chatMessages.length} messages)
-        </h4>
+      <div className="mt-4 p-4 bg-black/20 rounded-lg">
+        <h4 className="text-white font-medium mb-3">Group Chat ({chatMessages.length})</h4>
         <div
           ref={chatRef}
-          className="h-48 md:h-56 lg:h-64 overflow-y-auto bg-black/50 p-3 rounded mb-3 text-sm leading-relaxed"
-          style={{ scrollbarWidth: 'thin', scrollbarColor: '#888 #333' }}
+          className="h-48 sm:h-56 md:h-64 overflow-y-auto bg-black/50 p-3 rounded mb-3 text-sm"
         >
           {chatMessages.length === 0 ? (
-            <p className="text-white/60 italic text-center py-4">No messages yet. Start the conversation!</p>
+            <p className="text-white/60 italic text-center py-4">No messages yet</p>
           ) : (
             chatMessages.map((msg, idx) => (
               <div key={idx} className="mb-2 p-2 bg-white/10 rounded">
@@ -1200,7 +1133,7 @@ const Player = () => {
             ))
           )}
         </div>
-        <div className="flex space-x-2">
+        <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
           <Input
             type="text"
             value={chatInput}
@@ -1211,31 +1144,31 @@ const Player = () => {
                 sendChat();
               }
             }}
-            placeholder="Type a message or emoji... (Shift+Enter for new line)"
+            placeholder="Type a message or emoji..."
             className="flex-1 bg-transparent border-b border-white/20 text-white placeholder-white/50"
-            rows={1}
           />
-          <Button
-            onClick={sendChat}
-            disabled={!chatInput.trim()}
-            className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 px-4"
-          >
-            Send
-          </Button>
-          <Button
-            onClick={isRecordingVoice ? stopRecordingVoice : startRecordingVoice}
-            className={`px-4 ${isRecordingVoice ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
-          >
-            {isRecordingVoice ? <StopCircle className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
-          </Button>
+          <div className="flex space-x-2">
+            <Button
+              onClick={sendChat}
+              disabled={!chatInput.trim()}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500"
+            >
+              Send
+            </Button>
+            <Button
+              onClick={isRecordingVoice ? stopRecordingVoice : startRecordingVoice}
+              className={`px-4 ${isRecordingVoice ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
+            >
+              {isRecordingVoice ? <StopCircle className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
+            </Button>
+          </div>
         </div>
       </div>
     );
   };
 
   /**
-   * Renders the create room modal form.
-   * @returns {JSX.Element | null} The modal if open.
+   * Renders create room modal.
    */
   const renderCreateModal = () => {
     if (!isCreateModalOpen) return null;
@@ -1260,13 +1193,13 @@ const Player = () => {
             <Button onClick={createRoomAction} className="flex-1 bg-blue-600 hover:bg-blue-700">
               Create Room
             </Button>
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               onClick={() => {
                 setIsCreateModalOpen(false);
                 setCreateUsername('');
                 setCreatePassword('');
-              }} 
+              }}
               className="flex-1"
             >
               Cancel
@@ -1278,8 +1211,7 @@ const Player = () => {
   };
 
   /**
-   * Renders the join room modal form.
-   * @returns {JSX.Element | null} The modal if open.
+   * Renders join room modal.
    */
   const renderJoinModal = () => {
     if (!isJoinModalOpen) return null;
@@ -1312,14 +1244,14 @@ const Player = () => {
             <Button onClick={joinRoomAction} className="flex-1 bg-blue-600 hover:bg-blue-700">
               Join Room
             </Button>
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               onClick={() => {
                 setIsJoinModalOpen(false);
                 setJoinRoomID('');
                 setJoinUsername('');
                 setJoinPassword('');
-              }} 
+              }}
               className="flex-1"
             >
               Cancel
@@ -1332,8 +1264,7 @@ const Player = () => {
   };
 
   /**
-   * Renders the room URL sharing modal after creation.
-   * @returns {JSX.Element | null} The modal if open.
+   * Renders room URL sharing modal.
    */
   const renderRoomURLModal = () => {
     if (!isRoomURLModalOpen) return null;
@@ -1341,11 +1272,11 @@ const Player = () => {
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-60 p-4">
         <div className="bg-background p-6 rounded-lg border border-white/20 w-full max-w-md">
           <h3 className="text-white text-lg font-medium mb-4">Party Room Created</h3>
-          <p className="text-white/80 mb-3">Share this link with friends:</p>
-          <Input 
-            value={currentRoomURL} 
-            readOnly 
-            className="mb-3 text-sm" 
+          <p className="text-white/80 mb-3">Share this link:</p>
+          <Input
+            value={currentRoomURL}
+            readOnly
+            className="mb-3 text-sm"
             onFocus={(e) => e.target.select()}
           />
           <div className="flex space-x-2">
@@ -1353,12 +1284,12 @@ const Player = () => {
               <Copy className="h-4 w-4 mr-2" />
               Copy Link
             </Button>
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               onClick={() => {
                 setIsRoomURLModalOpen(false);
                 setCurrentRoomURL('');
-              }} 
+              }}
               className="flex-1"
             >
               Close
@@ -1370,17 +1301,15 @@ const Player = () => {
   };
 
   /**
-   * Renders the party watch overlay with all controls.
-   * Responsive layout for mobile/desktop.
-   * @returns {JSX.Element | null} The overlay if open.
+   * Renders party watch controls.
    */
   const renderPartyWatchControls = () => {
     if (!isSettingsOpen) return null;
     return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 overflow-y-auto p-4">
-        <div className="bg-background p-4 md:p-8 rounded-lg border border-white/20 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-          <div className="flex justify-between items-center mb-6 flex-wrap gap-2">
-            <h3 className="text-xl md:text-2xl font-medium text-white">Party Watch Controls</h3>
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div className="bg-background p-4 sm:p-6 md:p-8 rounded-lg border border-white/20 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-xl sm:text-2xl font-medium text-white">Party Watch Controls</h3>
             <Button
               variant="ghost"
               size="sm"
@@ -1391,11 +1320,10 @@ const Player = () => {
             </Button>
           </div>
 
-          <p className="text-sm text-white/60 mb-6">Connection Status: {connectionStatus}</p>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div>
               <h4 className="text-lg font-medium text-white mb-4">Room Management</h4>
+              <p className="text-sm text-white/60 mb-4">Status: {connectionStatus}</p>
               {!roomID ? (
                 <div className="flex flex-col space-y-3">
                   <Button
@@ -1412,8 +1340,8 @@ const Player = () => {
                   </Button>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  <p className="text-white">Room ID: {roomID}</p>
+                <div className="space-y-3">
+                  <p className="text-white text-sm">Room ID: {roomID}</p>
                   {isCreator ? (
                     <Button
                       onClick={destroyRoom}
@@ -1438,34 +1366,34 @@ const Player = () => {
               <div className="grid grid-cols-2 gap-3">
                 <Button
                   onClick={isVoiceEnabled ? disableVoice : enableVoice}
-                  className={`w-full flex items-center justify-center p-2 ${isVoiceEnabled ? 'bg-gray-500' : 'bg-blue-600 hover:bg-blue-700'}`}
+                  className={`flex items-center justify-center ${isVoiceEnabled ? 'bg-gray-500' : 'bg-blue-600 hover:bg-blue-700'}`}
                 >
-                  {isVoiceEnabled ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
+                  {isVoiceEnabled ? <MicOff className="h-4 w-4 mr-2" /> : <Mic className="h-4 w-4 mr-2" />}
                   {isVoiceEnabled ? 'Mute' : 'Unmute'}
                 </Button>
                 <Button
                   onClick={isVideoEnabled ? disableVideo : enableVideo}
-                  className={`w-full flex items-center justify-center p-2 ${isVideoEnabled ? 'bg-gray-500' : 'bg-purple-600 hover:bg-purple-700'}`}
+                  className={`flex items-center justify-center ${isVideoEnabled ? 'bg-gray-500' : 'bg-purple-600 hover:bg-purple-700'}`}
                 >
-                  {isVideoEnabled ? <VideoOff className="mr-2 h-4 w-4" /> : <Video className="mr-2 h-4 w-4" />}
+                  {isVideoEnabled ? <VideoOff className="h-4 w-4 mr-2" /> : <Video className="h-4 w-4 mr-2" />}
                   {isVideoEnabled ? 'Cam Off' : 'Cam On'}
                 </Button>
                 <Button
                   onClick={() => setIsChatOpen(!isChatOpen)}
-                  className="w-full flex items-center justify-center p-2 bg-green-600 hover:bg-green-700"
+                  className="flex items-center justify-center bg-green-600 hover:bg-green-700"
                 >
                   💬 {isChatOpen ? 'Hide Chat' : 'Show Chat'}
                 </Button>
                 <Button
                   onClick={isRecordingSession ? stopRecordingSession : startRecordingSession}
-                  className={`w-full flex items-center justify-center p-2 ${isRecordingSession ? 'bg-red-600 hover:bg-red-700' : 'bg-yellow-600 hover:bg-yellow-700'}`}
+                  className={`flex items-center justify-center ${isRecordingSession ? 'bg-red-600 hover:bg-red-700' : 'bg-yellow-600 hover:bg-yellow-700'}`}
                 >
-                  {isRecordingSession ? <StopCircle className="mr-2 h-4 w-4" /> : <Circle className="mr-2 h-4 w-4" />}
+                  {isRecordingSession ? <StopCircle className="h-4 w-4 mr-2" /> : <Circle className="h-4 w-4 mr-2" />}
                   {isRecordingSession ? 'Stop Rec' : 'Record'}
                 </Button>
                 <Button
                   onClick={() => setIsLogsOpen(!isLogsOpen)}
-                  className="w-full col-span-2 flex items-center justify-center p-2 bg-gray-600 hover:bg-gray-700"
+                  className="col-span-2 flex items-center justify-center bg-gray-600 hover:bg-gray-700"
                 >
                   📋 {isLogsOpen ? 'Hide Logs' : 'Show Logs'}
                 </Button>
@@ -1473,10 +1401,10 @@ const Player = () => {
             </div>
           </div>
 
-          {isLogsOpen && renderConnectionLogs()}
-          {renderPeerList()}
           {renderCameraStreams()}
-          {isChatOpen && renderChat()}
+          {renderConnectionLogs()}
+          {renderChat()}
+          {renderPeerList()}
         </div>
       </div>
     );
@@ -1488,12 +1416,9 @@ const Player = () => {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.5 }}
-      className="min-h-screen bg-background relative overflow-hidden"
+      className="min-h-screen bg-background relative"
     >
-      {/* Background gradient overlay */}
       <div className="fixed inset-0 bg-gradient-to-b from-background/95 to-background pointer-events-none z-0" />
-
-      {/* Navbar */}
       <motion.nav
         initial={{ y: -100 }}
         animate={{ y: 0 }}
@@ -1503,8 +1428,7 @@ const Player = () => {
         <Navbar />
       </motion.nav>
 
-      <div className="container mx-auto py-8 px-4 max-w-7xl">
-        {/* Media Actions */}
+      <div className="container mx-auto py-6 px-4 sm:px-6 md:px-8 max-w-7xl">
         <MediaActions
           isFavorite={isFavorite}
           isInMyWatchlist={isInMyWatchlist}
@@ -1514,8 +1438,7 @@ const Player = () => {
           onViewDetails={goToDetails}
         />
 
-        {/* Video Player */}
-        <div className="relative z-10 mb-8">
+        <div className="relative z-10 mb-6">
           <VideoPlayer
             isLoading={isLoading}
             iframeUrl={iframeUrl}
@@ -1530,9 +1453,8 @@ const Player = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="space-y-8 relative z-10"
+          className="space-y-6"
         >
-          {/* Episode Navigation for TV shows */}
           {mediaType === 'tv' && episodes.length > 0 && (
             <EpisodeNavigation
               episodes={episodes}
@@ -1542,18 +1464,17 @@ const Player = () => {
             />
           )}
 
-          {/* Video Sources Selector with Sync */}
           <div className="space-y-4 bg-black/10 p-4 rounded-lg">
-            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-              <div className="flex-1">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
                 <h3 className="text-lg font-medium text-white">Video Sources</h3>
-                <p className="text-sm text-white/60">Select your preferred streaming source (syncs with party)</p>
+                <p className="text-sm text-white/60">Select your preferred streaming source</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="border-white/10 bg-white/5 backdrop-blur-sm hover:bg-white/10 transition-all duration-300 min-w-[120px]"
+                  className="border-white/10 bg-white/5 hover:bg-white/10 min-w-[120px]"
                   onClick={goToDetails}
                 >
                   <ExternalLink className="h-4 w-4 mr-2" />
@@ -1562,14 +1483,14 @@ const Player = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="border-white/10 bg-white/5 backdrop-blur-sm hover:bg-white/10 transition-all duration-300 min-w-[120px]"
+                  className="border-white/10 bg-white/5 hover:bg-white/10 min-w-[120px]"
                   onClick={() => setIsSettingsOpen(true)}
                 >
                   Party Watch
                 </Button>
               </div>
             </div>
-            <VideoSourceSelector 
+            <VideoSourceSelector
               videoSources={videoSources}
               selectedSource={selectedSource}
               onSourceChange={syncedHandleSourceChange}
@@ -1578,15 +1499,10 @@ const Player = () => {
         </motion.div>
       </div>
 
-      {/* Party Watch Overlay */}
       {renderPartyWatchControls()}
-
-      {/* Modals for Room Management */}
       {renderCreateModal()}
       {renderJoinModal()}
       {renderRoomURLModal()}
-
-      {/* Error Modal */}
       {renderErrorModal()}
     </motion.div>
   );
