@@ -1,5 +1,5 @@
 import { useParams, useLocation } from 'react-router-dom';
-import { ExternalLink, X, Copy, Mic, MicOff, Video, VideoOff, Circle, StopCircle } from 'lucide-react';
+import { ExternalLink, X, Copy, Mic, MicOff, Video, VideoOff, Circle, StopCircle, AlertTriangle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,13 +17,14 @@ import { useState, useEffect, useRef, useCallback } from 'react';
  * Player component for video playback with party watch features.
  * Supports room creation/joining, voice and video calls, group chat with emojis and voice messages,
  * session recording, and synchronized video source selection.
- * Enhanced with robust error handling for service worker issues, WebRTC, and media operations.
- * Responsive design for mobile and desktop using Tailwind CSS.
- * Comprehensive logging for debugging and user feedback.
- * Fallback UI for service worker errors to maintain core functionality.
+ * Enhanced with robust error handling for service worker failures, including the 'Cannot access A before initialization' error.
+ * Implements exponential backoff for service worker retries and clear user feedback.
+ * Responsive design with Tailwind CSS for mobile and desktop compatibility.
+ * Comprehensive logging for debugging and user inspection.
+ * Fallback UI ensures core functionality persists despite service worker issues.
  */
 const Player = () => {
-  // Extract URL parameters for media playback
+  // URL parameters for media playback
   const { id, season, episode, type } = useParams<{
     id: string;
     season?: string;
@@ -63,7 +64,7 @@ const Player = () => {
     : undefined;
 
   // State for party watch features
-  const [isPeerLoaded, setIsPeerLoaded] = useState(false); // Tracks PeerJS loading status
+  const [isPeerLoaded, setIsPeerLoaded] = useState(false); // PeerJS loading status
   const [roomID, setRoomID] = useState<string | null>(null); // Current party room ID
   const [roomPassword, setRoomPassword] = useState<string | null>(null); // Room password
   const [username, setUsername] = useState<string>(user?.username || 'Anonymous'); // User's display name
@@ -83,7 +84,7 @@ const Player = () => {
   const [roomTimeout, setRoomTimeout] = useState<NodeJS.Timeout | null>(null); // Room auto-deletion timer
   const [connectionStatus, setConnectionStatus] = useState<string>('Disconnected'); // Connection status
   const [errorMessage, setErrorMessage] = useState<string | null>(null); // General error message
-  const [serviceWorkerError, setServiceWorkerError] = useState<string | null>('Service worker failed to initialize: Cannot access \'D\' before initialization'); // Service worker error
+  const [serviceWorkerError, setServiceWorkerError] = useState<string | null>('Service worker failed to initialize: Cannot access \'A\' before initialization'); // Service worker error
   const [connectionLogs, setConnectionLogs] = useState<string[]>([]); // Connection event logs
   const [isSettingsOpen, setIsSettingsOpen] = useState(false); // Party watch overlay visibility
   const [isLogsOpen, setIsLogsOpen] = useState(false); // Logs panel visibility
@@ -99,6 +100,7 @@ const Player = () => {
   const [isRecordingVoice, setIsRecordingVoice] = useState(false); // Voice message recording status
   const [isRecordingSession, setIsRecordingSession] = useState(false); // Session recording status
   const [retryCount, setRetryCount] = useState(0); // Service worker retry attempts
+  const [isServiceWorkerRetrying, setIsServiceWorkerRetrying] = useState(false); // Retry in progress
 
   // Refs for DOM elements and WebRTC objects
   const peerRef = useRef<any>(null); // PeerJS instance
@@ -109,10 +111,11 @@ const Player = () => {
   const sessionRecorder = useRef<MediaRecorder | null>(null); // Session recorder
   const recordedVoiceChunks = useRef<Blob[]>([]); // Voice message blobs
   const recordedSessionChunks = useRef<Blob[]>([]); // Session recording blobs
+  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Retry timeout ref
 
   /**
-   * Generates a random hex color for user messages in chat to visually distinguish users.
-   * Ensures unique visual identification for each participant's messages.
+   * Generates a random hex color for chat messages to visually distinguish users.
+   * Ensures unique color assignments for better readability.
    * @returns {string} A 6-digit hex color code with '#' prefix.
    */
   const generateUserColor = useCallback(() => {
@@ -150,7 +153,7 @@ const Player = () => {
    * @param {string} message - The event message to log.
    */
   const logConnectionEvent = useCallback((message: string) => {
-    setConnectionLogs((prev) => [...prev, `${new Date().toLocaleString()}: ${message}`]);
+    setConnectionLogs((prev) => [...prev, `${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })}: ${message}`]);
     if (logRef.current && isLogsOpen) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
@@ -158,39 +161,56 @@ const Player = () => {
   }, [isLogsOpen]);
 
   /**
-   * Attempts to retry service worker registration with a maximum of 3 attempts.
-   * Updates the UI with retry status and logs the outcome.
+   * Attempts to register the service worker with exponential backoff.
+   * Limits retries to 3 attempts and updates the UI with status.
+   * Uses delays of 1s, 2s, and 4s for retries to avoid overwhelming the system.
    */
   const retryServiceWorker = useCallback(() => {
     if (retryCount >= 3) {
-      setServiceWorkerError('Maximum retry attempts reached. Offline features may be unavailable.');
-      logConnectionEvent('Service worker retry limit reached');
+      setServiceWorkerError('Maximum retry attempts reached. Offline features are unavailable.');
+      setIsServiceWorkerRetrying(false);
+      logConnectionEvent('Service worker retry limit reached (3 attempts)');
+      return;
+    }
+
+    if (isServiceWorkerRetrying) {
+      logConnectionEvent('Retry already in progress, skipping');
       return;
     }
 
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker
-        .register('/sw.js')
-        .then((registration) => {
-          setServiceWorkerError(null);
-          setConnectionStatus('Service worker registered successfully');
-          logConnectionEvent(`Service worker registered with scope: ${registration.scope}`);
-        })
-        .catch((err) => {
-          setServiceWorkerError(`Service worker retry failed: ${err.message}`);
-          logConnectionEvent(`Service worker retry failed: ${err.message}`);
-          setRetryCount((prev) => prev + 1);
-        });
+      setIsServiceWorkerRetrying(true);
+      const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff: 1s, 2s, 4s
+      logConnectionEvent(`Attempting service worker registration (attempt ${retryCount + 1}) after ${delay}ms`);
+
+      retryTimeoutRef.current = setTimeout(() => {
+        navigator.serviceWorker
+          .register('/sw.js')
+          .then((registration) => {
+            setServiceWorkerError(null);
+            setConnectionStatus('Service worker registered successfully');
+            setIsServiceWorkerRetrying(false);
+            logConnectionEvent(`Service worker registered with scope: ${registration.scope}`);
+          })
+          .catch((err) => {
+            const errorMsg = `Service worker retry failed: ${err.message}`;
+            setServiceWorkerError(errorMsg);
+            setRetryCount((prev) => prev + 1);
+            setIsServiceWorkerRetrying(false);
+            logConnectionEvent(errorMsg);
+          });
+      }, delay);
     } else {
-      setServiceWorkerError('Service workers not supported in this browser');
+      setServiceWorkerError('Service workers are not supported in this browser');
+      setIsServiceWorkerRetrying(false);
       logConnectionEvent('Service workers not supported in this browser');
     }
-  }, [retryCount, logConnectionEvent]);
+  }, [retryCount, isServiceWorkerRetrying, logConnectionEvent]);
 
   /**
    * Loads the PeerJS library from CDN and checks service worker status.
-   * Handles cleanup of resources on component unmount to prevent memory leaks.
-   * Logs all loading and error events for debugging.
+   * Implements cleanup to prevent memory leaks and logs all events.
+   * Attempts initial service worker registration with retry on failure.
    */
   useEffect(() => {
     // Load PeerJS
@@ -211,17 +231,17 @@ const Player = () => {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations().then((registrations) => {
         if (!registrations.length) {
-          logConnectionEvent('No active service worker found');
+          logConnectionEvent('No active service worker found, attempting registration');
           retryServiceWorker();
         } else {
-          logConnectionEvent('Service worker found');
+          logConnectionEvent(`Found ${registrations.length} active service worker(s)`);
         }
       }).catch((err) => {
         setServiceWorkerError(`Service worker check failed: ${err.message}`);
         logConnectionEvent(`Service worker check failed: ${err.message}`);
       });
     } else {
-      setServiceWorkerError('Service workers not supported in this browser');
+      setServiceWorkerError('Service workers are not supported in this browser');
       logConnectionEvent('Service workers not supported in this browser');
     }
 
@@ -252,13 +272,17 @@ const Player = () => {
         sessionRecorder.current.stop();
         logConnectionEvent('Session recorder stopped on cleanup');
       }
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+        logConnectionEvent('Service worker retry timeout cleared on cleanup');
+      }
     };
   }, [logConnectionEvent, retryServiceWorker]);
 
   /**
-   * Initializes the PeerJS connection once the library is loaded.
+   * Initializes PeerJS connection once the library is loaded.
    * Sets up event listeners for peer connections, calls, and errors.
-   * Ensures robust error handling for WebRTC failures.
+   * Handles WebRTC initialization errors gracefully.
    */
   useEffect(() => {
     if (isPeerLoaded && !peerRef.current) {
@@ -269,7 +293,7 @@ const Player = () => {
 
         peerRef.current.on('open', (id: string) => {
           setMyPeerID(id);
-          setConnectionStatus('Connected to PeerJS');
+          setConnectionStatus('Connected to PeerJS server');
           logConnectionEvent(`Peer connection opened with ID: ${id}`);
         });
 
@@ -288,8 +312,8 @@ const Player = () => {
   }, [isPeerLoaded, logConnectionEvent]);
 
   /**
-   * Checks the URL for a room ID parameter and opens the join modal if present.
-   * Enables seamless joining via shared links.
+   * Checks URL for room ID parameter and opens join modal if present.
+   * Facilitates seamless joining via shared links.
    */
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
@@ -302,8 +326,8 @@ const Player = () => {
   }, [location.search, isPeerLoaded, roomID, logConnectionEvent]);
 
   /**
-   * Handles synchronized video source changes across all party members.
-   * Broadcasts the new source to ensure everyone switches simultaneously.
+   * Handles synchronized video source changes across party members.
+   * Broadcasts the new source to ensure synchronized playback.
    * @param {string} newSource - The new video source to select.
    */
   const syncedHandleSourceChange = useCallback(
@@ -312,7 +336,7 @@ const Player = () => {
         handleSourceChange(newSource);
         if (roomID) {
           broadcastToPeers({ type: 'source-change', source: newSource });
-          logConnectionEvent(`Synchronized video source change to: ${newSource}`);
+          logConnectionEvent(`Synchronized video source changed to: ${newSource}`);
         }
       } catch (err: any) {
         setErrorMessage(`Failed to change video source: ${err.message}`);
@@ -323,9 +347,8 @@ const Player = () => {
   );
 
   /**
-   * Creates a new party room after validating modal inputs.
-   * Sets up the peer connection and room timeout.
-   * Shows the sharing modal with the generated room URL.
+   * Creates a new party room after validating inputs.
+   * Sets up a new PeerJS instance and generates a shareable URL.
    */
   const createRoomAction = useCallback(() => {
     if (!createUsername.trim() || !createPassword.trim()) {
@@ -382,8 +405,8 @@ const Player = () => {
   }, [createUsername, createPassword, logConnectionEvent, sanitizeInput]);
 
   /**
-   * Joins an existing party room after validating modal inputs.
-   * Sends a join request to the creator and handles acceptance/rejection.
+   * Joins an existing party room after validating inputs.
+   * Sends a join request to the creator and handles responses.
    */
   const joinRoomAction = useCallback(() => {
     if (!joinRoomID.trim() || !joinPassword.trim()) {
@@ -1170,35 +1193,42 @@ const Player = () => {
    * @returns {string} Formatted time string (HH:MM:SS).
    */
   const formatTimestamp = useCallback((timestamp: number) => {
-    return new Date(timestamp).toLocaleTimeString([], {
+    return new Date(timestamp).toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
+      timeZone: 'Asia/Kolkata',
     });
   }, []);
 
   /**
    * Renders an error modal for general and service worker errors.
-   * Includes retry option for service worker errors with limited attempts.
+   * Includes retry option with status indicator and dismiss button.
    * @returns {JSX.Element | null} The modal if an error is present.
    */
   const renderErrorModal = () => {
     if (!errorMessage && !serviceWorkerError) return null;
     return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-60 p-4">
-        <div className="bg-background p-6 rounded-lg border border-white/20 min-w-[280px] max-w-md">
-          <h3 className="text-white text-lg font-medium mb-2">Error</h3>
-          <p className="text-white/80 mb-4 whitespace-pre-wrap">{errorMessage || serviceWorkerError}</p>
-          <div className="flex space-x-2">
+      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-60 p-4 sm:p-6">
+        <div className="bg-background p-6 sm:p-8 rounded-lg border border-white/20 min-w-[280px] max-w-md sm:max-w-lg shadow-xl">
+          <div className="flex items-center space-x-2 mb-4">
+            <AlertTriangle className="h-6 w-6 text-yellow-400" />
+            <h3 className="text-white text-lg sm:text-xl font-medium">Error</h3>
+          </div>
+          <p className="text-white/80 mb-6 text-sm sm:text-base whitespace-pre-wrap">
+            {errorMessage || serviceWorkerError}
+          </p>
+          <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
             {serviceWorkerError && retryCount < 3 ? (
               <Button
                 onClick={() => {
                   setErrorMessage(null);
                   retryServiceWorker();
                 }}
-                className="flex-1 bg-red-600 hover:bg-red-700"
+                disabled={isServiceWorkerRetrying}
+                className={`flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-500 ${isServiceWorkerRetrying ? 'animate-pulse' : ''}`}
               >
-                Retry ({3 - retryCount} attempts left)
+                {isServiceWorkerRetrying ? 'Retrying...' : `Retry (${3 - retryCount} attempts left)`}
               </Button>
             ) : null}
             <Button
@@ -1208,12 +1238,12 @@ const Player = () => {
               }}
               className="flex-1 bg-gray-600 hover:bg-gray-700"
             >
-              Close
+              Dismiss
             </Button>
           </div>
           {serviceWorkerError && (
-            <p className="text-xs text-white/60 mt-2">
-              Offline features may be limited due to service worker issues.
+            <p className="text-xs text-white/60 mt-4">
+              Offline features like caching may be unavailable, but core functionality remains intact.
             </p>
           )}
         </div>
@@ -1223,7 +1253,7 @@ const Player = () => {
 
   /**
    * Renders the list of connected peers in the party room.
-   * Displays peer IDs in a compact, scrollable list.
+   * Displays peer IDs in a compact, scrollable list with hover effects.
    * @returns {JSX.Element} The peer list UI.
    */
   const renderPeerList = () => (
@@ -1234,7 +1264,10 @@ const Player = () => {
       ) : (
         <ul className="space-y-1 max-h-40 overflow-y-auto">
           {Array.from(peers.keys()).map((peerID) => (
-            <li key={peerID} className="text-white/80 text-sm truncate">
+            <li
+              key={peerID}
+              className="text-white/80 text-sm truncate hover:bg-white/10 p-1 rounded transition-colors"
+            >
               • {peerID.substring(0, 8)}...
             </li>
           ))}
@@ -1255,12 +1288,16 @@ const Player = () => {
         <h4 className="text-white font-medium mb-2">Party Logs</h4>
         <div
           ref={logRef}
-          className="h-40 sm:h-48 overflow-y-auto bg-black/50 p-2 rounded text-white/80 text-xs leading-tight"
+          className="h-40 sm:h-48 md:h-56 overflow-y-auto bg-black/50 p-3 rounded text-white/80 text-xs leading-tight"
           style={{ scrollbarWidth: 'thin', scrollbarColor: '#888 #333' }}
         >
-          {connectionLogs.map((log, idx) => (
-            <div key={idx} className="mb-1 break-words">{log}</div>
-          ))}
+          {connectionLogs.length === 0 ? (
+            <p className="text-white/60 italic text-center py-4">No logs available</p>
+          ) : (
+            connectionLogs.map((log, idx) => (
+              <div key={idx} className="mb-1 break-words">{log}</div>
+            ))
+          )}
         </div>
       </div>
     );
@@ -1268,14 +1305,14 @@ const Player = () => {
 
   /**
    * Renders remote camera streams for video call participants.
-   * Ensures smooth playback with error handling.
+   * Ensures smooth playback with error handling and responsive sizing.
    * @returns {JSX.Element[]} Array of video elements for each stream.
    */
   const renderCameraStreams = () => {
     return Array.from(sharedStreams.entries()).map(([peerID, stream]) => {
       if (stream.getVideoTracks().length === 0) return null;
       return (
-        <div key={peerID} className="mt-4 p-2 bg-black/20 rounded-lg">
+        <div key={peerID} className="mt-4 p-3 bg-black/20 rounded-lg">
           <h5 className="text-white text-sm font-medium mb-2">Video from {peerID.substring(0, 8)}...</h5>
           <video
             ref={(el) => {
@@ -1290,7 +1327,7 @@ const Player = () => {
             autoPlay
             playsInline
             muted
-            className="w-full max-w-xs sm:max-w-sm h-auto border border-white/20 rounded"
+            className="w-full max-w-[280px] sm:max-w-sm md:max-w-md h-auto border border-white/20 rounded shadow"
           />
         </div>
       );
@@ -1299,7 +1336,7 @@ const Player = () => {
 
   /**
    * Renders the group chat panel with text input, voice recording, and message history.
-   * Supports emojis via standard input and provides a responsive layout.
+   * Supports emojis and provides a responsive layout with scrollable history.
    * @returns {JSX.Element | null} The chat UI if visible.
    */
   const renderChat = () => {
@@ -1315,10 +1352,10 @@ const Player = () => {
           style={{ scrollbarWidth: 'thin', scrollbarColor: '#888 #333' }}
         >
           {chatMessages.length === 0 ? (
-            <p className="text-white/60 italic text-center py-4">No messages yet. Start the conversation!</p>
+            <p className="text-white/60 italic text-center py-4">No messages yet. Start chatting!</p>
           ) : (
             chatMessages.map((msg, idx) => (
-              <div key={idx} className="mb-2 p-2 bg-white/10 rounded">
+              <div key={idx} className="mb-2 p-2 bg-white/10 rounded hover:bg-white/15 transition-colors">
                 <div className="flex items-start space-x-2">
                   <span className="font-bold text-xs" style={{ color: msg.color }}>
                     {msg.sender}
@@ -1332,17 +1369,17 @@ const Player = () => {
                     <audio
                       controls
                       src={msg.data}
-                      className="w-full max-w-xs"
+                      className="w-full max-w-[240px] sm:max-w-xs"
                       onError={(e) => logConnectionEvent(`Audio playback error: ${e.message}`)}
                     />
-                    <span className="text-gray-400 text-xs block">Voice message</span>
+                    <span className="text-gray-400 text-xs block mt-1">Voice message</span>
                   </div>
                 )}
               </div>
             ))
           )}
         </div>
-        <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
+        <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3">
           <Input
             type="text"
             value={chatInput}
@@ -1354,19 +1391,19 @@ const Player = () => {
               }
             }}
             placeholder="Type a message or emoji... (Shift+Enter for new line)"
-            className="flex-1 bg-transparent border-b border-white/20 text-white placeholder-white/50"
+            className="flex-1 bg-transparent border-b border-white/20 text-white placeholder-white/50 text-sm sm:text-base"
           />
           <div className="flex space-x-2">
             <Button
               onClick={sendChat}
               disabled={!chatInput.trim()}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 px-4"
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 px-4 sm:px-6"
             >
               Send
             </Button>
             <Button
               onClick={isRecordingVoice ? stopRecordingVoice : startRecordingVoice}
-              className={`px-4 ${isRecordingVoice ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
+              className={`px-4 sm:px-5 ${isRecordingVoice ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
             >
               {isRecordingVoice ? <StopCircle className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
             </Button>
@@ -1384,21 +1421,21 @@ const Player = () => {
   const renderCreateModal = () => {
     if (!isCreateModalOpen) return null;
     return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-60 p-4">
-        <div className="bg-background p-6 rounded-lg border border-white/20 w-full max-w-md sm:max-w-lg">
-          <h3 className="text-white text-lg font-medium mb-4">Create Party Room</h3>
+      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-60 p-4 sm:p-6">
+        <div className="bg-background p-6 sm:p-8 rounded-lg border border-white/20 w-full max-w-md sm:max-w-lg shadow-xl">
+          <h3 className="text-white text-lg sm:text-xl font-medium mb-4">Create Party Room</h3>
           <Input
             value={createUsername}
             onChange={(e) => setCreateUsername(e.target.value)}
             placeholder="Enter your username"
-            className="mb-3"
+            className="mb-3 text-sm sm:text-base"
           />
           <Input
             type="password"
             value={createPassword}
             onChange={(e) => setCreatePassword(e.target.value)}
             placeholder="Enter room password"
-            className="mb-4"
+            className="mb-4 text-sm sm:text-base"
           />
           <div className="flex space-x-2">
             <Button
@@ -1415,7 +1452,7 @@ const Player = () => {
                 setCreateUsername('');
                 setCreatePassword('');
               }}
-              className="flex-1"
+              className="flex-1 text-white hover:bg-white/10"
             >
               Cancel
             </Button>
@@ -1427,35 +1464,35 @@ const Player = () => {
 
   /**
    * Renders the join room modal form.
-   * Auto-fills room ID from URL if present.
+   * Auto-fills room ID from URL if present for seamless joining.
    * @returns {JSX.Element | null} The modal if open.
    */
   const renderJoinModal = () => {
     if (!isJoinModalOpen) return null;
     const isFromURL = !!new URLSearchParams(location.search).get('room');
     return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-60 p-4">
-        <div className="bg-background p-6 rounded-lg border border-white/20 w-full max-w-md sm:max-w-lg">
-          <h3 className="text-white text-lg font-medium mb-4">Join Party Room</h3>
+      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-60 p-4 sm:p-6">
+        <div className="bg-background p-6 sm:p-8 rounded-lg border border-white/20 w-full max-w-md sm:max-w-lg shadow-xl">
+          <h3 className="text-white text-lg sm:text-xl font-medium mb-4">Join Party Room</h3>
           <Input
             value={joinRoomID}
             onChange={(e) => setJoinRoomID(e.target.value)}
             placeholder="Enter room ID or URL"
-            className="mb-3"
+            className="mb-3 text-sm sm:text-base"
             disabled={isFromURL}
           />
           <Input
             value={joinUsername}
             onChange={(e) => setJoinUsername(e.target.value)}
             placeholder="Enter your username (optional)"
-            className="mb-3"
+            className="mb-3 text-sm sm:text-base"
           />
           <Input
             type="password"
             value={joinPassword}
             onChange={(e) => setJoinPassword(e.target.value)}
             placeholder="Enter room password"
-            className="mb-4"
+            className="mb-4 text-sm sm:text-base"
           />
           <div className="flex space-x-2">
             <Button
@@ -1473,12 +1510,14 @@ const Player = () => {
                 setJoinUsername('');
                 setJoinPassword('');
               }}
-              className="flex-1"
+              className="flex-1 text-white hover:bg-white/10"
             >
               Cancel
             </Button>
           </div>
-          {isFromURL && <p className="text-xs text-white/60 mt-2">Room ID auto-filled from URL</p>}
+          {isFromURL && (
+            <p className="text-xs text-white/60 mt-3">Room ID auto-filled from shared URL</p>
+          )}
         </div>
       </div>
     );
@@ -1486,20 +1525,20 @@ const Player = () => {
 
   /**
    * Renders the room URL sharing modal.
-   * Allows copying the room link for sharing.
+   * Allows copying the room link for sharing with friends.
    * @returns {JSX.Element | null} The modal if open.
    */
   const renderRoomURLModal = () => {
     if (!isRoomURLModalOpen) return null;
     return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-60 p-4">
-        <div className="bg-background p-6 rounded-lg border border-white/20 w-full max-w-md sm:max-w-lg">
-          <h3 className="text-white text-lg font-medium mb-4">Party Room Created</h3>
-          <p className="text-white/80 mb-3">Share this link with friends:</p>
+      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-60 p-4 sm:p-6">
+        <div className="bg-background p-6 sm:p-8 rounded-lg border border-white/20 w-full max-w-md sm:max-w-lg shadow-xl">
+          <h3 className="text-white text-lg sm:text-xl font-medium mb-4">Party Room Created</h3>
+          <p className="text-white/80 mb-3 text-sm sm:text-base">Share this link with friends:</p>
           <Input
             value={currentRoomURL}
             readOnly
-            className="mb-3 text-sm"
+            className="mb-3 text-sm sm:text-base"
             onFocus={(e) => e.target.select()}
           />
           <div className="flex space-x-2">
@@ -1513,7 +1552,7 @@ const Player = () => {
                 setIsRoomURLModalOpen(false);
                 setCurrentRoomURL('');
               }}
-              className="flex-1"
+              className="flex-1 text-white hover:bg-white/10"
             >
               Close
             </Button>
@@ -1525,15 +1564,15 @@ const Player = () => {
 
   /**
    * Renders the party watch overlay with all controls.
-   * Responsive layout with grid system for mobile and desktop.
+   * Includes responsive grid layout, service worker warning, and all party features.
    * @returns {JSX.Element | null} The overlay if open.
    */
   const renderPartyWatchControls = () => {
     if (!isSettingsOpen) return null;
     return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 sm:p-6">
-        <div className="bg-background p-4 sm:p-6 md:p-8 rounded-lg border border-white/20 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-          <div className="flex justify-between items-center mb-6 flex-wrap gap-2">
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 sm:p-6 md:p-8">
+        <div className="bg-background p-4 sm:p-6 md:p-8 rounded-lg border border-white/20 w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl">
+          <div className="flex justify-between items-center mb-6 flex-wrap gap-3">
             <h3 className="text-xl sm:text-2xl font-medium text-white">Party Watch Controls</h3>
             <Button
               variant="ghost"
@@ -1545,45 +1584,48 @@ const Player = () => {
             </Button>
           </div>
 
-          <p className="text-sm text-white/60 mb-6">Connection Status: {connectionStatus}</p>
+          <p className="text-sm text-white/60 mb-4">Connection Status: {connectionStatus}</p>
           {serviceWorkerError && (
-            <p className="text-sm text-yellow-400 mb-4">
-              Warning: Offline features may be limited due to service worker issues.
-            </p>
+            <div className="flex items-center space-x-2 mb-4 p-3 bg-yellow-900/20 border border-yellow-500/30 rounded">
+              <AlertTriangle className="h-5 w-5 text-yellow-400" />
+              <p className="text-sm text-yellow-400">
+                Offline features may be limited due to service worker issues. Core functionality is unaffected.
+              </p>
+            </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
             <div>
-              <h4 className="text-lg font-medium text-white mb-4">Room Management</h4>
+              <h4 className="text-lg font-medium text-white mb-3">Room Management</h4>
               {!roomID ? (
                 <div className="flex flex-col space-y-3">
                   <Button
                     onClick={() => setIsCreateModalOpen(true)}
-                    className="bg-blue-600 hover:bg-blue-700 w-full"
+                    className="bg-blue-600 hover:bg-blue-700 w-full text-sm sm:text-base py-2"
                   >
                     Create Party Room
                   </Button>
                   <Button
                     onClick={() => setIsJoinModalOpen(true)}
-                    className="bg-green-600 hover:bg-green-700 w-full"
+                    className="bg-green-600 hover:bg-green-700 w-full text-sm sm:text-base py-2"
                   >
                     Join Party Room
                   </Button>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <p className="text-white text-sm">Room ID: {roomID}</p>
+                  <p className="text-white text-sm sm:text-base">Room ID: {roomID}</p>
                   {isCreator ? (
                     <Button
                       onClick={destroyRoom}
-                      className="bg-red-600 hover:bg-red-700 w-full"
+                      className="bg-red-600 hover:bg-red-700 w-full text-sm sm:text-base py-2"
                     >
                       Destroy Room
                     </Button>
                   ) : (
                     <Button
                       onClick={leaveRoom}
-                      className="bg-orange-600 hover:bg-orange-700 w-full"
+                      className="bg-orange-600 hover:bg-orange-700 w-full text-sm sm:text-base py-2"
                     >
                       Leave Room
                     </Button>
@@ -1593,38 +1635,38 @@ const Player = () => {
             </div>
 
             <div>
-              <h4 className="text-lg font-medium text-white mb-4">Media Controls</h4>
+              <h4 className="text-lg font-medium text-white mb-3">Media Controls</h4>
               <div className="grid grid-cols-2 gap-3">
                 <Button
                   onClick={isVoiceEnabled ? disableVoice : enableVoice}
-                  className={`flex items-center justify-center ${isVoiceEnabled ? 'bg-gray-500' : 'bg-blue-600 hover:bg-blue-700'}`}
+                  className={`flex items-center justify-center text-sm sm:text-base py-2 ${isVoiceEnabled ? 'bg-gray-500' : 'bg-blue-600 hover:bg-blue-700'}`}
                 >
                   {isVoiceEnabled ? <MicOff className="h-4 w-4 mr-2" /> : <Mic className="h-4 w-4 mr-2" />}
                   {isVoiceEnabled ? 'Mute' : 'Unmute'}
                 </Button>
                 <Button
                   onClick={isVideoEnabled ? disableVideo : enableVideo}
-                  className={`flex items-center justify-center ${isVideoEnabled ? 'bg-gray-500' : 'bg-purple-600 hover:bg-purple-700'}`}
+                  className={`flex items-center justify-center text-sm sm:text-base py-2 ${isVideoEnabled ? 'bg-gray-500' : 'bg-purple-600 hover:bg-purple-700'}`}
                 >
                   {isVideoEnabled ? <VideoOff className="h-4 w-4 mr-2" /> : <Video className="h-4 w-4 mr-2" />}
                   {isVideoEnabled ? 'Cam Off' : 'Cam On'}
                 </Button>
                 <Button
                   onClick={() => setIsChatOpen(!isChatOpen)}
-                  className="flex items-center justify-center bg-green-600 hover:bg-green-700"
+                  className="flex items-center justify-center bg-green-600 hover:bg-green-700 text-sm sm:text-base py-2"
                 >
                   💬 {isChatOpen ? 'Hide Chat' : 'Show Chat'}
                 </Button>
                 <Button
                   onClick={isRecordingSession ? stopRecordingSession : startRecordingSession}
-                  className={`flex items-center justify-center ${isRecordingSession ? 'bg-red-600 hover:bg-red-700' : 'bg-yellow-600 hover:bg-yellow-700'}`}
+                  className={`flex items-center justify-center text-sm sm:text-base py-2 ${isRecordingSession ? 'bg-red-600 hover:bg-red-700' : 'bg-yellow-600 hover:bg-yellow-700'}`}
                 >
                   {isRecordingSession ? <StopCircle className="h-4 w-4 mr-2" /> : <Circle className="h-4 w-4 mr-2" />}
                   {isRecordingSession ? 'Stop Rec' : 'Record'}
                 </Button>
                 <Button
                   onClick={() => setIsLogsOpen(!isLogsOpen)}
-                  className="col-span-2 flex items-center justify-center bg-gray-600 hover:bg-gray-700"
+                  className="col-span-2 flex items-center justify-center bg-gray-600 hover:bg-gray-700 text-sm sm:text-base py-2"
                 >
                   📋 {isLogsOpen ? 'Hide Logs' : 'Show Logs'}
                 </Button>
@@ -1662,7 +1704,7 @@ const Player = () => {
         <Navbar />
       </motion.nav>
 
-      <div className="container mx-auto py-6 px-4 sm:px-6 md:px-8 max-w-7xl">
+      <div className="container mx-auto py-6 px-4 sm:px-6 md:px-8 lg:px-10 max-w-7xl">
         {/* Media Actions for favorite, watchlist, and navigation */}
         <MediaActions
           isFavorite={isFavorite}
@@ -1702,17 +1744,17 @@ const Player = () => {
           )}
 
           {/* Video Sources Selector with Sync */}
-          <div className="space-y-4 bg-black/10 p-4 rounded-lg">
+          <div className="space-y-4 bg-black/10 p-4 sm:p-6 rounded-lg shadow-md">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div className="flex-1">
-                <h3 className="text-lg font-medium text-white">Video Sources</h3>
+                <h3 className="text-lg sm:text-xl font-medium text-white">Video Sources</h3>
                 <p className="text-sm text-white/60">Select your preferred streaming source (syncs with party)</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="border-white/10 bg-white/5 backdrop-blur-sm hover:bg-white/10 min-w-[120px]"
+                  className="border-white/10 bg-white/5 backdrop-blur-sm hover:bg-white/10 min-w-[120px] sm:min-w-[140px] text-sm sm:text-base"
                   onClick={goToDetails}
                 >
                   <ExternalLink className="h-4 w-4 mr-2" />
@@ -1721,7 +1763,7 @@ const Player = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="border-white/10 bg-white/5 backdrop-blur-sm hover:bg-white/10 min-w-[120px]"
+                  className="border-white/10 bg-white/5 backdrop-blur-sm hover:bg-white/10 min-w-[120px] sm:min-w-[140px] text-sm sm:text-base"
                   onClick={() => setIsSettingsOpen(true)}
                 >
                   Party Watch
