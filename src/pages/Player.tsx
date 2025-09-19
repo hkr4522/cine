@@ -35,12 +35,20 @@ import { videoSources } from '@/utils/video-sources';
 import { cn } from '@/lib/utils';
 import { v4 as uuidv4 } from 'uuid';
 
-// Initialize Socket.IO client with reconnection settings
-const socket: Socket = io('http://your-backend-server:3000', {
+// Dynamic Socket.IO URL for Netlify deployment (no hardcoded domain)
+const getBackendUrl = () => {
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+  console.log('Backend URL (Netlify deploy):', backendUrl);
+  return backendUrl;
+};
+
+// Initialize Socket.IO client with Netlify-compatible settings
+const socket: Socket = io(getBackendUrl(), {
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
-  transports: ['websocket'],
+  transports: ['websocket'], // Force WebSocket to avoid polling issues on Netlify
+  secure: import.meta.env.MODE === 'production', // HTTPS for Netlify
 });
 
 // Animation variants for smooth UI transitions
@@ -93,7 +101,7 @@ const Player = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Authentication hook for user data
+  // Authentication hook for user data (optional for guests)
   const { user, isLoading: isAuthLoading } = useAuth();
 
   // Media player hook for playback controls and data
@@ -153,30 +161,39 @@ const Player = () => {
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<PeerConnection[]>([]);
 
-  // Check for service worker support
+  // Check for service worker support (Vite PWA compatibility for Netlify)
   useEffect(() => {
     if (!navigator.serviceWorker) {
       setIsServiceWorkerError(true);
       setError('Service worker not supported. Some features may be limited.');
       toast.warning('Service worker not supported');
-      console.warn('Service worker not supported');
+      console.warn('Service worker not supported - Vite PWA may conflict with Socket.IO/WebRTC');
+    } else {
+      // Register service worker with defer to avoid conflicts
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((err) => {
+          console.warn('Service worker registration failed (Netlify deploy):', err);
+        });
+      }
     }
   }, []);
 
-  // Check URL for room ID to auto-open Party Watch
+  // Check URL for room ID to auto-open Party Watch (shareable link)
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const roomIdFromUrl = params.get('roomId');
     if (roomIdFromUrl) {
       setJoinRoomId(roomIdFromUrl);
       setIsPartyWatchOpen(true);
-      console.log('Detected room ID from URL:', roomIdFromUrl);
+      console.log('Detected room ID from URL (Netlify deploy):', roomIdFromUrl);
     }
   }, [location]);
 
   // Generate random room ID
   const generateRoomId = useCallback(() => {
-    return Math.random().toString(36).substring(2, 10).toUpperCase();
+    const roomId = Math.random().toString(36).substring(2, 10).toUpperCase();
+    console.log('Generated room ID (Netlify deploy):', roomId);
+    return roomId;
   }, []);
 
   // Create a new room
@@ -184,7 +201,13 @@ const Player = () => {
     if (!roomPassword.trim()) {
       setError('Please enter a password to create a room');
       toast.error('Password is required');
-      console.error('Create room failed: Password missing');
+      console.error('Create room failed: Password missing (Netlify deploy)');
+      return;
+    }
+    if (!isSocketConnected) {
+      setError('Cannot create room: Not connected to server');
+      toast.error('Not connected to server');
+      console.error('Create room failed: Socket not connected (Netlify deploy)');
       return;
     }
     setIsLoadingRoom(true);
@@ -197,17 +220,23 @@ const Player = () => {
       userId: tempUserId,
       username: tempUsername,
     });
-    console.log('Creating room:', { roomId: newRoomId, userId: tempUserId });
-    // Update URL with room ID
+    console.log('Creating room (Netlify deploy):', { roomId: newRoomId, userId: tempUserId });
+    // Update URL with room ID for shareable link
     navigate(`${location.pathname}?roomId=${newRoomId}`, { replace: true });
-  }, [roomPassword, tempUserId, tempUsername, navigate, location]);
+  }, [roomPassword, tempUserId, tempUsername, navigate, location, isSocketConnected]);
 
   // Join an existing room
   const joinRoom = useCallback(() => {
     if (!joinRoomId.trim() || !joinRoomPassword.trim()) {
       setError('Room ID and password are required');
       toast.error('Room ID and password are required');
-      console.error('Join room failed: Missing room ID or password');
+      console.error('Join room failed: Missing room ID or password (Netlify deploy)');
+      return;
+    }
+    if (!isSocketConnected) {
+      setError('Cannot join room: Not connected to server');
+      toast.error('Not connected to server');
+      console.error('Join room failed: Socket not connected (Netlify deploy)');
       return;
     }
     setIsLoadingRoom(true);
@@ -217,18 +246,20 @@ const Player = () => {
       userId: tempUserId,
       username: tempUsername,
     });
-    console.log('Joining room:', { roomId: joinRoomId, userId: tempUserId });
-  }, [joinRoomId, joinRoomPassword, tempUserId, tempUsername]);
+    console.log('Joining room (Netlify deploy):', { roomId: joinRoomId, userId: tempUserId });
+  }, [joinRoomId, joinRoomPassword, tempUserId, tempUsername, isSocketConnected]);
 
   // Generate shareable link
   const generateShareLink = useCallback(() => {
-    const link = `${window.location.origin}${location.pathname}?roomId=${roomId}`;
+    const baseUrl = window.location.origin;
+    const link = `${baseUrl}${location.pathname}?roomId=${roomId}`;
+    console.log('Generated share link (Netlify deploy):', link);
     return link;
   }, [roomId, location]);
 
   // Copy shareable link to clipboard
   const copyShareLink = useCallback(() => {
-    console.log('Copy share link button clicked');
+    console.log('Copy share link button clicked (Netlify deploy)');
     const link = generateShareLink();
     navigator.clipboard.writeText(link).then(() => {
       setChatMessages((prev) => [
@@ -241,16 +272,16 @@ const Player = () => {
           timestamp: Date.now(),
         },
       ]);
-      console.log('Share link copied:', link);
+      console.log('Share link copied (Netlify deploy):', link);
       toast.success('Share link copied');
     }).catch((err) => {
       setError('Failed to copy share link');
       toast.error('Failed to copy share link');
-      console.error('Copy share link error:', err);
+      console.error('Copy share link error (Netlify deploy):', err);
     });
   }, [generateShareLink]);
 
-  // Initialize WebRTC for voice/video communication
+  // Initialize WebRTC for voice/video communication (Netlify HTTPS compatible)
   const initWebRTC = useCallback(async () => {
     try {
       const constraints = {
@@ -262,18 +293,24 @@ const Player = () => {
         localVideoRef.current.srcObject = localStreamRef.current;
       }
       socket.emit('webrtc-offer', { roomId, userId: tempUserId });
-      console.log('WebRTC initialized for user:', tempUserId);
+      console.log('WebRTC initialized for user (Netlify deploy):', tempUserId);
       toast.success('WebRTC initialized successfully');
     } catch (err) {
       setError(`Failed to initialize WebRTC: ${err.message}`);
       toast.error(`WebRTC error: ${err.message}`);
-      console.error('WebRTC initialization error:', err);
+      console.error('WebRTC initialization error (Netlify deploy):', err);
     }
   }, [isVideoChatActive, isVoiceChatActive, roomId, tempUserId]);
 
-  // Start screen sharing (Telegram-like)
+  // Start screen sharing (Telegram-like, Netlify HTTPS compatible)
   const startScreenSharing = useCallback(async () => {
-    console.log('Screen share button clicked, attempting to start sharing');
+    console.log('Screen share button clicked, attempting to start sharing (Netlify deploy)');
+    if (!isSocketConnected) {
+      setError('Cannot share screen: Not connected to server');
+      toast.error('Not connected to server');
+      console.error('Screen share failed: Socket not connected (Netlify deploy)');
+      return;
+    }
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: { cursor: 'always' },
@@ -299,19 +336,19 @@ const Player = () => {
       screenStream.getVideoTracks()[0].onended = () => {
         stopScreenSharing();
       };
-      console.log('Screen sharing started for user:', tempUserId);
+      console.log('Screen sharing started for user (Netlify deploy):', tempUserId);
       socket.emit('screen-share-started', { roomId, userId: tempUserId });
       toast.success('Screen sharing started');
     } catch (err) {
       setError(`Failed to start screen sharing: ${err.message}`);
       toast.error(`Screen sharing error: ${err.message}`);
-      console.error('Screen sharing error:', err);
+      console.error('Screen sharing error (Netlify deploy):', err);
     }
-  }, [tempUserId, roomId]);
+  }, [tempUserId, roomId, isSocketConnected]);
 
   // Stop screen sharing
   const stopScreenSharing = useCallback(async () => {
-    console.log('Stopping screen sharing');
+    console.log('Stopping screen sharing (Netlify deploy)');
     if (screenShareRef.current?.srcObject) {
       (screenShareRef.current.srcObject as MediaStream).getTracks().forEach((track) => track.stop());
       screenShareRef.current.srcObject = null;
@@ -331,16 +368,16 @@ const Player = () => {
           if (localVideoRef.current) {
             localVideoRef.current.srcObject = localStreamRef.current;
           }
-          console.log('Screen sharing stopped, video restored');
+          console.log('Screen sharing stopped, video restored (Netlify deploy)');
           socket.emit('screen-share-stopped', { roomId, userId: tempUserId });
           toast.success('Screen sharing stopped, video restored');
         } catch (err) {
           setError(`Failed to restore video stream: ${err.message}`);
           toast.error(`Video restore error: ${err.message}`);
-          console.error('Video restore error:', err);
+          console.error('Video restore error (Netlify deploy):', err);
         }
       } else {
-        console.log('Screen sharing stopped');
+        console.log('Screen sharing stopped (Netlify deploy)');
         socket.emit('screen-share-stopped', { roomId, userId: tempUserId });
         toast.success('Screen sharing stopped');
       }
@@ -349,7 +386,13 @@ const Player = () => {
 
   // Toggle voice chat
   const toggleVoiceChat = useCallback(async () => {
-    console.log('Voice chat button clicked, active:', !isVoiceChatActive);
+    console.log('Voice chat button clicked, active:', !isVoiceChatActive, '(Netlify deploy)');
+    if (!isSocketConnected) {
+      setError('Cannot start voice chat: Not connected to server');
+      toast.error('Not connected to server');
+      console.error('Voice chat failed: Socket not connected (Netlify deploy)');
+      return;
+    }
     if (!isVoiceChatActive) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -367,24 +410,30 @@ const Player = () => {
           }
         });
         setIsVoiceChatActive(true);
-        console.log('Voice chat enabled for user:', tempUserId);
+        console.log('Voice chat enabled for user (Netlify deploy):', tempUserId);
         toast.success('Voice chat enabled');
       } catch (err) {
         setError(`Failed to start voice chat: ${err.message}`);
         toast.error(`Voice chat error: ${err.message}`);
-        console.error('Voice chat error:', err);
+        console.error('Voice chat error (Netlify deploy):', err);
       }
     } else {
       localStreamRef.current?.getAudioTracks().forEach((track) => track.stop());
       setIsVoiceChatActive(false);
-      console.log('Voice chat disabled');
+      console.log('Voice chat disabled (Netlify deploy)');
       toast.info('Voice chat disabled');
     }
-  }, [isVoiceChatActive, tempUserId]);
+  }, [isVoiceChatActive, tempUserId, isSocketConnected]);
 
   // Toggle video chat
   const toggleVideoChat = useCallback(async () => {
-    console.log('Video chat button clicked, active:', !isVideoChatActive);
+    console.log('Video chat button clicked, active:', !isVideoChatActive, '(Netlify deploy)');
+    if (!isSocketConnected) {
+      setError('Cannot start video chat: Not connected to server');
+      toast.error('Not connected to server');
+      console.error('Video chat failed: Socket not connected (Netlify deploy)');
+      return;
+    }
     if (!isVideoChatActive) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -405,12 +454,12 @@ const Player = () => {
           }
         });
         setIsVideoChatActive(true);
-        console.log('Video chat enabled for user:', tempUserId);
+        console.log('Video chat enabled for user (Netlify deploy):', tempUserId);
         toast.success('Video chat enabled');
       } catch (err) {
         setError(`Failed to start video chat: ${err.message}`);
         toast.error(`Video chat error: ${err.message}`);
-        console.error('Video chat error:', err);
+        console.error('Video chat error (Netlify deploy):', err);
       }
     } else {
       localStreamRef.current?.getVideoTracks().forEach((track) => track.stop());
@@ -418,40 +467,55 @@ const Player = () => {
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = localStreamRef.current;
       }
-      console.log('Video chat disabled');
+      console.log('Video chat disabled (Netlify deploy)');
       toast.info('Video chat disabled');
     }
-  }, [isVideoChatActive, tempUserId]);
+  }, [isVideoChatActive, tempUserId, isSocketConnected]);
 
   // Send chat message
   const sendChatMessage = useCallback(() => {
-    if (chatInput.trim()) {
-      const message: ChatMessage = {
-        roomId,
-        userId: tempUserId,
-        username: tempUsername,
-        message: chatInput,
-        timestamp: Date.now(),
-      };
-      socket.emit('chat-message', message);
-      setChatInput('');
-      console.log('Chat message sent:', message);
+    if (!chatInput.trim()) {
+      console.log('Chat message empty, not sending (Netlify deploy)');
+      return;
     }
-  }, [chatInput, roomId, tempUserId, tempUsername]);
+    if (!isSocketConnected) {
+      setError('Cannot send message: Not connected to server');
+      toast.error('Not connected to server');
+      console.error('Chat message failed: Socket not connected (Netlify deploy)');
+      return;
+    }
+    const message: ChatMessage = {
+      roomId,
+      userId: tempUserId,
+      username: tempUsername,
+      message: chatInput,
+      timestamp: Date.now(),
+    };
+    socket.emit('chat-message', message);
+    setChatInput('');
+    console.log('Chat message sent (Netlify deploy):', message);
+  }, [chatInput, roomId, tempUserId, tempUsername, isSocketConnected]);
 
   // Handle Socket.IO events
   useEffect(() => {
     socket.on('connect', () => {
       setIsSocketConnected(true);
       setError('');
-      console.log('Socket connected');
+      console.log('Socket connected (Netlify deploy)');
       toast.info('Connected to server');
+    });
+
+    socket.on('connect_error', (err) => {
+      setIsSocketConnected(false);
+      setError(`Failed to connect to server: ${err.message}`);
+      console.error('Socket connect error (Netlify deploy):', err);
+      toast.error(`Server connection failed: ${err.message}`);
     });
 
     socket.on('disconnect', () => {
       setIsSocketConnected(false);
       setError('Disconnected from server. Attempting to reconnect...');
-      console.warn('Socket disconnected');
+      console.warn('Socket disconnected (Netlify deploy)');
       toast.error('Disconnected from server');
     });
 
@@ -472,7 +536,7 @@ const Player = () => {
           timestamp: Date.now(),
         },
       ]);
-      console.log('Room joined:', { roomId, users });
+      console.log('Room joined (Netlify deploy):', { roomId, users });
       toast.success(`Joined room ${roomId}`);
     });
 
@@ -480,13 +544,13 @@ const Player = () => {
       setError(message);
       setIsRoomCreated(false);
       setIsLoadingRoom(false);
-      console.error('Room error:', message);
+      console.error('Room error (Netlify deploy):', message);
       toast.error(message);
     });
 
     socket.on('chat-message', ({ userId, username, message, timestamp }) => {
       setChatMessages((prev) => [...prev, { userId, username, message, timestamp }]);
-      console.log('Received chat message:', { userId, username, message });
+      console.log('Received chat message (Netlify deploy):', { userId, username, message });
     });
 
     socket.on('user-joined', ({ userId, username }) => {
@@ -501,7 +565,7 @@ const Player = () => {
         },
       ]);
       setParticipants((prev) => [...prev, { id: userId, username }]);
-      console.log('User joined:', { userId, username });
+      console.log('User joined (Netlify deploy):', { userId, username });
       toast.info(`${username} joined the room`);
     });
 
@@ -527,7 +591,7 @@ const Player = () => {
           return newPeers;
         });
       }
-      console.log('User left:', { userId, username });
+      console.log('User left (Netlify deploy):', { userId, username });
       toast.info(`${username} left the room`);
     });
 
@@ -539,7 +603,8 @@ const Player = () => {
         config: {
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
-            // Add TURN server for production
+            { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
           ],
         },
       });
@@ -557,20 +622,20 @@ const Player = () => {
 
       peer.on('error', (err) => {
         setError(`WebRTC peer error: ${err.message}`);
-        console.error('WebRTC peer error:', err);
+        console.error('WebRTC peer error (Netlify deploy):', err);
         toast.error(`WebRTC peer error: ${err.message}`);
       });
 
       peer.signal(offer);
       peersRef.current.push({ userId: from, peer });
-      console.log('WebRTC offer received from:', from);
+      console.log('WebRTC offer received from (Netlify deploy):', from);
     });
 
     socket.on('webrtc-answer', ({ from, answer }) => {
       const peer = peersRef.current.find((p) => p.userId === from);
       if (peer) {
         peer.peer.signal(answer);
-        console.log('WebRTC answer received from:', from);
+        console.log('WebRTC answer received from (Netlify deploy):', from);
       }
     });
 
@@ -585,7 +650,7 @@ const Player = () => {
           timestamp: Date.now(),
         },
       ]);
-      console.log('Screen share started by:', userId);
+      console.log('Screen share started by (Netlify deploy):', userId);
     });
 
     socket.on('screen-share-stopped', ({ userId }) => {
@@ -599,11 +664,12 @@ const Player = () => {
           timestamp: Date.now(),
         },
       ]);
-      console.log('Screen share stopped by:', userId);
+      console.log('Screen share stopped by (Netlify deploy):', userId);
     });
 
     return () => {
       socket.off('connect');
+      socket.off('connect_error');
       socket.off('disconnect');
       socket.off('room-joined');
       socket.off('room-error');
@@ -635,7 +701,7 @@ const Player = () => {
         socket.emit('leave-room', { roomId, userId: tempUserId });
       }
       socket.disconnect();
-      console.log('Component unmounted, cleaned up resources');
+      console.log('Component unmounted, cleaned up resources (Netlify deploy)');
     };
   }, [roomId, tempUserId]);
 
@@ -680,7 +746,7 @@ const Player = () => {
             size="sm"
             className="ml-2 border-white/10 bg-white/5 hover:bg-white/10"
             onClick={() => {
-              console.log('Retry connection button clicked');
+              console.log('Retry connection button clicked (Netlify deploy)');
               socket.connect();
             }}
           >
@@ -754,7 +820,7 @@ const Player = () => {
                         size="sm"
                         className="absolute top-4 right-4"
                         onClick={() => {
-                          console.log('Stop screen sharing button clicked');
+                          console.log('Stop screen sharing button clicked (Netlify deploy)');
                           stopScreenSharing();
                         }}
                       >
@@ -790,7 +856,7 @@ const Player = () => {
                       !isSocketConnected && 'opacity-50 cursor-not-allowed'
                     )}
                     onClick={() => {
-                      console.log('Join Party Watch button clicked');
+                      console.log('Join Party Watch button clicked (Netlify deploy)');
                       setIsPartyWatchOpen(true);
                     }}
                     disabled={!isSocketConnected}
@@ -867,7 +933,7 @@ const Player = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            console.log('Close Party Watch button clicked');
+                            console.log('Close Party Watch button clicked (Netlify deploy)');
                             if (roomId) {
                               socket.emit('leave-room', { roomId, userId: tempUserId });
                               setRoomId('');
@@ -920,15 +986,15 @@ const Player = () => {
                         value={roomPassword}
                         onChange={(e) => setRoomPassword(e.target.value)}
                         className="mb-3 bg-white/5 border-white/10 text-white"
-                        disabled={isLoadingRoom}
+                        disabled={isLoadingRoom || !isSocketConnected}
                       />
                       <Button
                         className="w-full bg-blue-600 hover:bg-blue-700 transition-all duration-200"
                         onClick={() => {
-                          console.log('Create Room button clicked');
+                          console.log('Create Room button clicked (Netlify deploy)');
                           createRoom();
                         }}
-                        disabled={!roomPassword.trim() || isLoadingRoom}
+                        disabled={!roomPassword.trim() || isLoadingRoom || !isSocketConnected}
                       >
                         {isLoadingRoom ? (
                           <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -942,7 +1008,7 @@ const Player = () => {
                     <div>
                       <h3 className="text-lg font-medium text-white mb-2">Join an Existing Room</h3>
                       <p className="text-sm text-white/60 mb-2">
-                        Enter the password to join the watch party
+                        Enter the room ID and password to join the watch party
                       </p>
                       <Input
                         type="text"
@@ -950,7 +1016,7 @@ const Player = () => {
                         value={joinRoomId}
                         onChange={(e) => setJoinRoomId(e.target.value.toUpperCase())}
                         className="mb-3 bg-white/5 border-white/10 text-white"
-                        disabled={isLoadingRoom}
+                        disabled={isLoadingRoom || !isSocketConnected}
                       />
                       <Input
                         type="password"
@@ -958,15 +1024,15 @@ const Player = () => {
                         value={joinRoomPassword}
                         onChange={(e) => setJoinRoomPassword(e.target.value)}
                         className="mb-3 bg-white/5 border-white/10 text-white"
-                        disabled={isLoadingRoom}
+                        disabled={isLoadingRoom || !isSocketConnected}
                       />
                       <Button
                         className="w-full bg-green-600 hover:bg-green-700 transition-all duration-200"
                         onClick={() => {
-                          console.log('Join Room button clicked');
+                          console.log('Join Room button clicked (Netlify deploy)');
                           joinRoom();
                         }}
-                        disabled={!joinRoomId.trim() || !joinRoomPassword.trim() || isLoadingRoom}
+                        disabled={!joinRoomId.trim() || !joinRoomPassword.trim() || isLoadingRoom || !isSocketConnected}
                       >
                         {isLoadingRoom ? (
                           <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -1003,6 +1069,7 @@ const Player = () => {
                               size="sm"
                               className="mt-2 w-full border-white/10 bg-white/5 hover:bg-white/10"
                               onClick={copyShareLink}
+                              disabled={!isSocketConnected}
                             >
                               <Copy className="h-4 w-4 mr-2" />
                               Copy Share Link
@@ -1020,9 +1087,10 @@ const Player = () => {
                       size="sm"
                       className="w-full border-white/10 bg-white/5 hover:bg-white/10"
                       onClick={() => {
-                        console.log('Screen Share button clicked in Party Watch');
+                        console.log('Screen Share button clicked in Party Watch (Netlify deploy)');
                         isScreenSharing ? stopScreenSharing() : startScreenSharing();
                       }}
+                      disabled={!isSocketConnected}
                     >
                       <Share2 className="h-4 w-4 mr-2" />
                       {isScreenSharing ? 'Stop Screen Share' : 'Share Screen'}
@@ -1031,7 +1099,7 @@ const Player = () => {
                       variant="destructive"
                       className="w-full"
                       onClick={() => {
-                        console.log('Leave Room button clicked');
+                        console.log('Leave Room button clicked (Netlify deploy)');
                         socket.emit('leave-room', { roomId, userId: tempUserId });
                         setRoomId('');
                         setChatMessages([]);
@@ -1044,6 +1112,7 @@ const Player = () => {
                         navigate(location.pathname, { replace: true });
                         toast.info('Left the room');
                       }}
+                      disabled={!isSocketConnected}
                     >
                       Leave Room
                     </Button>
@@ -1064,10 +1133,10 @@ const Player = () => {
                             size="sm"
                             className="border-white/10 bg-white/5 hover:bg-white/10"
                             onClick={() => {
-                              console.log('Voice Chat button clicked in Room Interaction');
+                              console.log('Voice Chat button clicked in Room Interaction (Netlify deploy)');
                               toggleVoiceChat();
                             }}
-                            disabled={!roomId}
+                            disabled={!roomId || !isSocketConnected}
                           >
                             <Mic className="h-4 w-4 mr-2" />
                             {isVoiceChatActive ? 'Stop Voice' : 'Start Voice'}
@@ -1084,10 +1153,10 @@ const Player = () => {
                             size="sm"
                             className="border-white/10 bg-white/5 hover:bg-white/10"
                             onClick={() => {
-                              console.log('Video Chat button clicked in Room Interaction');
+                              console.log('Video Chat button clicked in Room Interaction (Netlify deploy)');
                               toggleVideoChat();
                             }}
-                            disabled={!roomId}
+                            disabled={!roomId || !isSocketConnected}
                           >
                             <Video className="h-4 w-4 mr-2" />
                             {isVideoChatActive ? 'Stop Video' : 'Start Video'}
@@ -1182,11 +1251,11 @@ const Player = () => {
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     className="flex-1 bg-white/5 border-white/10 text-white resize-none h-12"
-                    disabled={!roomId}
+                    disabled={!roomId || !isSocketConnected}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
-                        console.log('Chat send button clicked via Enter');
+                        console.log('Chat send button clicked via Enter (Netlify deploy)');
                         sendChatMessage();
                       }
                     }}
@@ -1197,10 +1266,10 @@ const Player = () => {
                         <Button
                           className="ml-2 bg-blue-600 hover:bg-blue-700"
                           onClick={() => {
-                            console.log('Chat send button clicked');
+                            console.log('Chat send button clicked (Netlify deploy)');
                             sendChatMessage();
                           }}
-                          disabled={!roomId || !chatInput.trim()}
+                          disabled={!roomId || !chatInput.trim() || !isSocketConnected}
                         >
                           <MessageSquare className="h-4 w-4" />
                         </Button>
