@@ -35,7 +35,7 @@ import { videoSources } from '@/utils/video-sources';
 import { cn } from '@/lib/utils';
 import { v4 as uuidv4 } from 'uuid';
 
-// Dynamic Socket.IO URL for Netlify deployment
+// Dynamic Socket.IO URL
 const getBackendUrl = () => {
   const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
   console.log('Backend URL (Netlify deploy):', backendUrl);
@@ -45,10 +45,10 @@ const getBackendUrl = () => {
 // Initialize Socket.IO client
 const socket: Socket = io(getBackendUrl(), {
   reconnection: true,
-  reconnectionAttempts: 5,
+  reconnectionAttempts: 10,
   reconnectionDelay: 1000,
-  transports: ['websocket'], // Force WebSocket for Netlify
-  secure: import.meta.env.MODE === 'production', // HTTPS for Netlify
+  transports: ['websocket'],
+  secure: import.meta.env.MODE === 'production',
 });
 
 // Animation variants
@@ -143,6 +143,7 @@ const Player = () => {
   const [isLoadingRoom, setIsLoadingRoom] = useState(false);
   const [tempUserId] = useState(user?.id || (typeof uuidv4 === 'function' ? uuidv4() : Math.random().toString(36).substring(2, 10)));
   const [tempUsername] = useState(user?.username || `Guest_${tempUserId.slice(0, 4)}`);
+  const [currentIframeUrl, setCurrentIframeUrl] = useState(iframeUrl); // Sync iframe URL
 
   // Refs
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -175,6 +176,15 @@ const Player = () => {
     }
   }, [location]);
 
+  // Sync iframe URL
+  useEffect(() => {
+    setCurrentIframeUrl(iframeUrl);
+    if (roomId && isSocketConnected) {
+      socket.emit('sync-video-source', { roomId, iframeUrl, userId: tempUserId });
+      console.log('Synced video source (Netlify deploy):', { roomId, iframeUrl });
+    }
+  }, [iframeUrl, roomId, tempUserId, isSocketConnected]);
+
   // Generate random room ID
   const generateRoomId = useCallback(() => {
     const roomId = Math.random().toString(36).substring(2, 10).toUpperCase();
@@ -205,10 +215,11 @@ const Player = () => {
       password: roomPassword,
       userId: tempUserId,
       username: tempUsername,
+      iframeUrl: currentIframeUrl,
     });
-    console.log('Creating room (Netlify deploy):', { roomId: newRoomId, userId: tempUserId });
+    console.log('Creating room (Netlify deploy):', { roomId: newRoomId, userId: tempUserId, iframeUrl: currentIframeUrl });
     navigate(`${location.pathname}?roomId=${newRoomId}`, { replace: true });
-  }, [roomPassword, tempUserId, tempUsername, navigate, location, isSocketConnected]);
+  }, [roomPassword, tempUserId, tempUsername, navigate, location, isSocketConnected, currentIframeUrl]);
 
   // Join room
   const joinRoom = useCallback(() => {
@@ -498,8 +509,9 @@ const Player = () => {
       toast.error('Disconnected from server');
     });
 
-    socket.on('room-joined', ({ roomId, users }) => {
+    socket.on('room-joined', ({ roomId, users, iframeUrl }) => {
       setRoomId(roomId);
+      setCurrentIframeUrl(iframeUrl || currentIframeUrl);
       setIsPartyWatchOpen(true);
       setIsLoadingRoom(false);
       setError('');
@@ -515,7 +527,7 @@ const Player = () => {
           timestamp: Date.now(),
         },
       ]);
-      console.log('Room joined (Netlify deploy):', { roomId, users });
+      console.log('Room joined (Netlify deploy):', { roomId, users, iframeUrl });
       toast.success(`Joined room ${roomId}`);
     });
 
@@ -646,6 +658,12 @@ const Player = () => {
       console.log('Screen share stopped (Netlify deploy):', userId);
     });
 
+    socket.on('sync-video-source', ({ iframeUrl, userId }) => {
+      setCurrentIframeUrl(iframeUrl);
+      console.log('Video source synced (Netlify deploy):', { iframeUrl, userId });
+      toast.info(`Video source updated by ${participants.find((p) => p.id === userId)?.username || 'User'}`);
+    });
+
     return () => {
       socket.off('connect');
       socket.off('connect_error');
@@ -659,8 +677,9 @@ const Player = () => {
       socket.off('webrtc-answer');
       socket.off('screen-share-started');
       socket.off('screen-share-stopped');
+      socket.off('sync-video-source');
     };
-  }, [roomId, initWebRTC, participants]);
+  }, [roomId, initWebRTC, participants, currentIframeUrl]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -758,52 +777,19 @@ const Player = () => {
           onBack={goBack}
           onViewDetails={goToDetails}
         />
-        <div className="relative">
-          <VideoPlayer
-            isLoading={isLoading}
-            iframeUrl={iframeUrl}
-            title={title}
-            poster={posterUrl}
-            onLoaded={handlePlayerLoaded}
-            onError={handlePlayerError}
-          />
-          <AnimatePresence>
-            {isScreenSharing && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="absolute top-0 left-0 w-full h-full bg-black/90 flex items-center justify-center z-20"
-              >
-                <video
-                  ref={screenShareRef}
-                  autoPlay
-                  className="w-full h-full object-contain rounded-lg"
-                />
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        className="absolute top-4 right-4 z-30"
-                        onClick={() => {
-                          console.log('Stop screen sharing button clicked (Netlify deploy)');
-                          stopScreenSharing();
-                        }}
-                      >
-                        Stop Sharing
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>End screen sharing</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+        {/* Video Player outside Party Watch */}
+        {!roomId && (
+          <div className="relative">
+            <VideoPlayer
+              isLoading={isLoading}
+              iframeUrl={iframeUrl}
+              title={title}
+              poster={posterUrl}
+              onLoaded={handlePlayerLoaded}
+              onError={handlePlayerError}
+            />
+          </div>
+        )}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -860,7 +846,13 @@ const Player = () => {
             <VideoSourceSelector
               videoSources={videoSources}
               selectedSource={selectedSource}
-              onSourceChange={handleSourceChange}
+              onSourceChange={(source) => {
+                handleSourceChange(source);
+                if (roomId && isSocketConnected) {
+                  socket.emit('sync-video-source', { roomId, iframeUrl: source.url, userId: tempUserId });
+                  console.log('Video source changed and synced (Netlify deploy):', source.url);
+                }
+              }}
             />
           </div>
         </motion.div>
@@ -876,341 +868,390 @@ const Player = () => {
           >
             <motion.div
               variants={modalVariants}
-              className="bg-background rounded-lg shadow-lg w-full max-w-5xl h-[90vh] flex flex-col md:flex-row overflow-hidden"
+              className="bg-background rounded-lg shadow-lg w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden"
             >
-              <div className="w-full md:w-1/3 p-6 border-r border-white/10">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-bold text-white">Party Watch</h2>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            console.log('Close Party Watch button clicked (Netlify deploy)');
-                            if (roomId) {
-                              socket.emit('leave-room', { roomId, userId: tempUserId });
-                              setRoomId('');
-                              setChatMessages([]);
-                              setIsVoiceChatActive(false);
-                              setIsVideoChatActive(false);
-                              stopScreenSharing();
-                              setParticipants([]);
-                              navigate(location.pathname, { replace: true });
-                            }
-                            setIsPartyWatchOpen(false);
-                            setIsRoomCreated(false);
-                            setRoomPassword('');
-                            setJoinRoomId('');
-                            setJoinRoomPassword('');
-                            setError('');
-                          }}
-                        >
-                          <X className="h-5 w-5 text-white" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Close Party Watch</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-                {renderConnectionStatus()}
-                {error && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="text-red-500 mb-4 p-3 bg-red-500/10 rounded flex items-center"
-                  >
-                    <AlertCircle className="h-5 w-5 mr-2" />
-                    {error}
-                  </motion.div>
-                )}
-                {!roomId ? (
-                  <div className="space-y-6">
-                    <div>
-                      <h3 className="text-lg font-medium text-white mb-2">Create a New Room</h3>
-                      <p className="text-sm text-white/60 mb-2">Create a private room to watch together</p>
-                      <Input
-                        type="password"
-                        placeholder="Enter room password"
-                        value={roomPassword}
-                        onChange={(e) => setRoomPassword(e.target.value)}
-                        className="mb-3 bg-white/5 border-white/10 text-white"
+              {/* Video Player in Party Watch */}
+              {roomId && (
+                <div className="relative w-full h-1/2">
+                  <VideoPlayer
+                    isLoading={isLoading}
+                    iframeUrl={currentIframeUrl}
+                    title={title}
+                    poster={posterUrl}
+                    onLoaded={handlePlayerLoaded}
+                    onError={handlePlayerError}
+                  />
+                  {isScreenSharing && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="absolute top-0 left-0 w-full h-full bg-black/90 flex items-center justify-center z-20"
+                    >
+                      <video
+                        ref={screenShareRef}
+                        autoPlay
+                        className="w-full h-full object-contain rounded-lg"
                       />
-                      <Button
-                        className="w-full bg-blue-600 hover:bg-blue-700 transition-all duration-200"
-                        onClick={() => {
-                          console.log('Create Room button clicked (Netlify deploy)');
-                          createRoom();
-                        }}
-                        disabled={!roomPassword.trim() || isLoadingRoom}
-                      >
-                        {isLoadingRoom ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <Lock className="h-4 w-4 mr-2" />
-                        )}
-                        Create Room
-                      </Button>
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-medium text-white mb-2">Join an Existing Room</h3>
-                      <p className="text-sm text-white/60 mb-2">Enter room ID and password</p>
-                      <Input
-                        type="text"
-                        placeholder="Room ID (from share link)"
-                        value={joinRoomId}
-                        onChange={(e) => setJoinRoomId(e.target.value.toUpperCase())}
-                        className="mb-3 bg-white/5 border-white/10 text-white"
-                      />
-                      <Input
-                        type="password"
-                        placeholder="Enter room password"
-                        value={joinRoomPassword}
-                        onChange={(e) => setJoinRoomPassword(e.target.value)}
-                        className="mb-3 bg-white/5 border-white/10 text-white"
-                      />
-                      <Button
-                        className="w-full bg-green-600 hover:bg-green-700 transition-all duration-200"
-                        onClick={() => {
-                          console.log('Join Room button clicked (Netlify deploy)');
-                          joinRoom();
-                        }}
-                        disabled={!joinRoomId.trim() || !joinRoomPassword.trim() || isLoadingRoom}
-                      >
-                        {isLoadingRoom ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <Users className="h-4 w-4 mr-2" />
-                        )}
-                        Join Room
-                      </Button>
-                    </div>
-                    {!user && (
-                      <p className="text-sm text-white/60">
-                        Joining as guest ({tempUsername}).{' '}
-                        <a href="/login" className="text-blue-500 hover:underline">
-                          Log in
-                        </a>
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="bg-white/5 p-4 rounded-lg">
-                      <p className="text-white font-medium">
-                        Room ID: <span className="font-bold">{roomId}</span>
-                      </p>
-                      <p className="text-white/60 text-sm mt-1">Share this link to invite others</p>
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
-                              variant="outline"
+                              variant="destructive"
                               size="sm"
-                              className="mt-2 w-full border-white/10 bg-white/5 hover:bg-white/10"
-                              onClick={copyShareLink}
+                              className="absolute top-4 right-4 z-30"
+                              onClick={() => {
+                                console.log('Stop screen sharing button clicked (Netlify deploy)');
+                                stopScreenSharing();
+                              }}
                             >
-                              <Copy className="h-4 w-4 mr-2" />
-                              Copy Share Link
+                              Stop Sharing
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>
-                            <p>Copy share link</p>
+                            <p>End screen sharing</p>
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
-                    </div>
-                    {renderParticipantList()}
-                    <Button
-                      variant={isScreenSharing ? 'destructive' : 'outline'}
-                      size="sm"
-                      className="w-full border-white/10 bg-white/5 hover:bg-white/10"
-                      onClick={() => {
-                        console.log('Screen Share button clicked (Netlify deploy)');
-                        isScreenSharing ? stopScreenSharing() : startScreenSharing();
-                      }}
-                    >
-                      <Share2 className="h-4 w-4 mr-2" />
-                      {isScreenSharing ? 'Stop Screen Share' : 'Share Screen'}
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      className="w-full"
-                      onClick={() => {
-                        console.log('Leave Room button clicked (Netlify deploy)');
-                        socket.emit('leave-room', { roomId, userId: tempUserId });
-                        setRoomId('');
-                        setChatMessages([]);
-                        setIsVoiceChatActive(false);
-                        setIsVideoChatActive(false);
-                        stopScreenSharing();
-                        setIsRoomCreated(false);
-                        setRoomPassword('');
-                        setParticipants([]);
-                        navigate(location.pathname, { replace: true });
-                        toast.info('Left the room');
-                      }}
-                    >
-                      Leave Room
-                    </Button>
-                  </div>
-                )}
-              </div>
-              <div className="w-full md:w-2/3 p-6 flex flex-col">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-medium text-white">Room Interaction</h3>
-                  <div className="flex space-x-2">
+                    </motion.div>
+                  )}
+                </div>
+              )}
+              <div className="flex flex-col md:flex-row flex-1">
+                <div className="w-full md:w-1/3 p-6 border-r border-white/10">
+                  <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-bold text-white">Party Watch</h2>
                     <TooltipProvider>
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Button
-                            variant={isVoiceChatActive ? 'destructive' : 'outline'}
+                            variant="ghost"
                             size="sm"
-                            className="border-white/10 bg-white/5 hover:bg-white/10"
                             onClick={() => {
-                              console.log('Voice Chat button clicked (Netlify deploy)');
-                              toggleVoiceChat();
+                              console.log('Close Party Watch button clicked (Netlify deploy)');
+                              if (roomId) {
+                                socket.emit('leave-room', { roomId, userId: tempUserId });
+                                setRoomId('');
+                                setChatMessages([]);
+                                setIsVoiceChatActive(false);
+                                setIsVideoChatActive(false);
+                                stopScreenSharing();
+                                setParticipants([]);
+                                navigate(location.pathname, { replace: true });
+                              }
+                              setIsPartyWatchOpen(false);
+                              setIsRoomCreated(false);
+                              setRoomPassword('');
+                              setJoinRoomId('');
+                              setJoinRoomPassword('');
+                              setError('');
                             }}
-                            disabled={!roomId}
                           >
-                            <Mic className="h-4 w-4 mr-2" />
-                            {isVoiceChatActive ? 'Stop Voice' : 'Start Voice'}
+                            <X className="h-5 w-5 text-white" />
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent>
-                          <p>{isVoiceChatActive ? 'Disable voice chat' : 'Enable voice chat'}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant={isVideoChatActive ? 'destructive' : 'outline'}
-                            size="sm"
-                            className="border-white/10 bg-white/5 hover:bg-white/10"
-                            onClick={() => {
-                              console.log('Video Chat button clicked (Netlify deploy)');
-                              toggleVideoChat();
-                            }}
-                            disabled={!roomId}
-                          >
-                            <Video className="h-4 w-4 mr-2" />
-                            {isVideoChatActive ? 'Stop Video' : 'Start Video'}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>{isVideoChatActive ? 'Disable video chat' : 'Enable video chat'}</p>
+                          <p>Close Party Watch</p>
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                   </div>
-                </div>
-                <ScrollArea className="flex flex-wrap gap-3 mb-4 h-32">
-                  {isVideoChatActive && (
+                  {renderConnectionStatus()}
+                  {error && (
                     <motion.div
-                      initial={{ scale: 0.8, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      className="w-40 h-28 bg-black rounded-lg overflow-hidden relative"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="text-red-500 mb-4 p-3 bg-red-500/10 rounded flex items-center"
                     >
-                      <video
-                        ref={localVideoRef}
-                        autoPlay
-                        muted
-                        className="w-full h-full object-cover"
-                      />
-                      <span className="absolute bottom-1 left-1 text-xs text-white bg-black/50 px-2 py-1 rounded">
-                        {tempUsername}
-                      </span>
+                      <AlertCircle className="h-5 w-5 mr-2" />
+                      {error}
                     </motion.div>
                   )}
-                  {Object.keys(peers).map((peerId) => (
-                    <motion.div
-                      key={peerId}
-                      initial={{ scale: 0.8, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      className="w-40 h-28 bg-black rounded-lg overflow-hidden relative"
-                    >
-                      <video
-                        ref={(el) => {
-                          if (el && peers[peerId]) el.srcObject = peers[peerId];
-                        }}
-                        autoPlay
-                        className="w-full h-full object-cover"
-                      />
-                      <span className="absolute bottom-1 left-1 text-xs text-white bg-black/50 px-2 py-1 rounded">
-                        {participants.find((p) => p.id === peerId)?.username || `User ${peerId.slice(0, 4)}`}
-                      </span>
-                    </motion.div>
-                  ))}
-                </ScrollArea>
-                <ScrollArea className="flex-1 p-4 bg-white/5 rounded-lg mb-4">
-                  {chatMessages.length === 0 && (
-                    <p className="text-white/60 text-center py-4">No messages yet. Start chatting!</p>
-                  )}
-                  {chatMessages.map((msg, index) => (
-                    <motion.div
-                      key={index}
-                      variants={chatMessageVariants}
-                      initial="hidden"
-                      animate="visible"
-                      className={cn(
-                        'mb-3 p-3 rounded-lg',
-                        msg.type === 'system'
-                          ? 'text-white/60 bg-white/5'
-                          : msg.userId === tempUserId
-                          ? 'bg-blue-600/20 text-white ml-auto max-w-[80%]'
-                          : 'bg-white/10 text-white max-w-[80%]'
-                      )}
-                    >
-                      <div className="flex justify-between items-baseline">
-                        <span className="font-medium text-sm">
-                          {msg.type === 'system' ? 'System' : msg.username}
-                        </span>
-                        <span className="text-xs text-white/50">
-                          {new Date(msg.timestamp).toLocaleTimeString()}
-                        </span>
-                      </div>
-                      <span>{msg.message}</span>
-                    </motion.div>
-                  ))}
-                  <div ref={chatContainerRef} />
-                </ScrollArea>
-                <div className="flex items-center">
-                  <Textarea
-                    placeholder="Type a message..."
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    className="flex-1 bg-white/5 border-white/10 text-white resize-none h-12"
-                    disabled={!roomId}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        console.log('Chat send button clicked via Enter (Netlify deploy)');
-                        sendChatMessage();
-                      }
-                    }}
-                  />
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
+                  {!roomId ? (
+                    <div className="space-y-6">
+                      <div>
+                        <h3 className="text-lg font-medium text-white mb-2">Create a New Room</h3>
+                        <p className="text-sm text-white/60 mb-2">Create a private room to watch together</p>
+                        <Input
+                          type="password"
+                          placeholder="Enter room password"
+                          value={roomPassword}
+                          onChange={(e) => setRoomPassword(e.target.value)}
+                          className="mb-3 bg-white/5 border-white/10 text-white"
+                        />
                         <Button
-                          className="ml-2 bg-blue-600 hover:bg-blue-700"
+                          className="w-full bg-blue-600 hover:bg-blue-700 transition-all duration-200"
                           onClick={() => {
-                            console.log('Chat send button clicked (Netlify deploy)');
-                            sendChatMessage();
+                            console.log('Create Room button clicked (Netlify deploy)');
+                            createRoom();
                           }}
-                          disabled={!roomId || !chatInput.trim()}
+                          disabled={!roomPassword.trim() || isLoadingRoom}
                         >
-                          <MessageSquare className="h-4 w-4" />
+                          {isLoadingRoom ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <Lock className="h-4 w-4 mr-2" />
+                          )}
+                          Create Room
                         </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Send message</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-medium text-white mb-2">Join an Existing Room</h3>
+                        <p className="text-sm text-white/60 mb-2">Enter room ID and password</p>
+                        <Input
+                          type="text"
+                          placeholder="Room ID (from share link)"
+                          value={joinRoomId}
+                          onChange={(e) => setJoinRoomId(e.target.value.toUpperCase())}
+                          className="mb-3 bg-white/5 border-white/10 text-white"
+                        />
+                        <Input
+                          type="password"
+                          placeholder="Enter room password"
+                          value={joinRoomPassword}
+                          onChange={(e) => setJoinRoomPassword(e.target.value)}
+                          className="mb-3 bg-white/5 border-white/10 text-white"
+                        />
+                        <Button
+                          className="w-full bg-green-600 hover:bg-green-700 transition-all duration-200"
+                          onClick={() => {
+                            console.log('Join Room button clicked (Netlify deploy)');
+                            joinRoom();
+                          }}
+                          disabled={!joinRoomId.trim() || !joinRoomPassword.trim() || isLoadingRoom}
+                        >
+                          {isLoadingRoom ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <Users className="h-4 w-4 mr-2" />
+                          )}
+                          Join Room
+                        </Button>
+                      </div>
+                      {!user && (
+                        <p className="text-sm text-white/60">
+                          Joining as guest ({tempUsername}).{' '}
+                          <a href="/login" className="text-blue-500 hover:underline">
+                            Log in
+                          </a>
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="bg-white/5 p-4 rounded-lg">
+                        <p className="text-white font-medium">
+                          Room ID: <span className="font-bold">{roomId}</span>
+                        </p>
+                        <p className="text-white/60 text-sm mt-1">Share this link to invite others</p>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="mt-2 w-full border-white/10 bg-white/5 hover:bg-white/10"
+                                onClick={copyShareLink}
+                              >
+                                <Copy className="h-4 w-4 mr-2" />
+                                Copy Share Link
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Copy share link</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </div>
+                      {renderParticipantList()}
+                      <Button
+                        variant={isScreenSharing ? 'destructive' : 'outline'}
+                        size="sm"
+                        className="w-full border-white/10 bg-white/5 hover:bg-white/10"
+                        onClick={() => {
+                          console.log('Screen Share button clicked (Netlify deploy)');
+                          isScreenSharing ? stopScreenSharing() : startScreenSharing();
+                        }}
+                      >
+                        <Share2 className="h-4 w-4 mr-2" />
+                        {isScreenSharing ? 'Stop Screen Share' : 'Share Screen'}
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        className="w-full"
+                        onClick={() => {
+                          console.log('Leave Room button clicked (Netlify deploy)');
+                          socket.emit('leave-room', { roomId, userId: tempUserId });
+                          setRoomId('');
+                          setChatMessages([]);
+                          setIsVoiceChatActive(false);
+                          setIsVideoChatActive(false);
+                          stopScreenSharing();
+                          setIsRoomCreated(false);
+                          setRoomPassword('');
+                          setParticipants([]);
+                          navigate(location.pathname, { replace: true });
+                          toast.info('Left the room');
+                        }}
+                      >
+                        Leave Room
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                <div className="w-full md:w-2/3 p-6 flex flex-col">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-medium text-white">Room Interaction</h3>
+                    <div className="flex space-x-2">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant={isVoiceChatActive ? 'destructive' : 'outline'}
+                              size="sm"
+                              className="border-white/10 bg-white/5 hover:bg-white/10"
+                              onClick={() => {
+                                console.log('Voice Chat button clicked (Netlify deploy)');
+                                toggleVoiceChat();
+                              }}
+                              disabled={!roomId}
+                            >
+                              <Mic className="h-4 w-4 mr-2" />
+                              {isVoiceChatActive ? 'Stop Voice' : 'Start Voice'}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{isVoiceChatActive ? 'Disable voice chat' : 'Enable voice chat'}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant={isVideoChatActive ? 'destructive' : 'outline'}
+                              size="sm"
+                              className="border-white/10 bg-white/5 hover:bg-white/10"
+                              onClick={() => {
+                                console.log('Video Chat button clicked (Netlify deploy)');
+                                toggleVideoChat();
+                              }}
+                              disabled={!roomId}
+                            >
+                              <Video className="h-4 w-4 mr-2" />
+                              {isVideoChatActive ? 'Stop Video' : 'Start Video'}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{isVideoChatActive ? 'Disable video chat' : 'Enable video chat'}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
+                  </div>
+                  <ScrollArea className="flex flex-wrap gap-3 mb-4 h-32">
+                    {isVideoChatActive && (
+                      <motion.div
+                        initial={{ scale: 0.8, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        className="w-40 h-28 bg-black rounded-lg overflow-hidden relative"
+                      >
+                        <video
+                          ref={localVideoRef}
+                          autoPlay
+                          muted
+                          className="w-full h-full object-cover"
+                        />
+                        <span className="absolute bottom-1 left-1 text-xs text-white bg-black/50 px-2 py-1 rounded">
+                          {tempUsername}
+                        </span>
+                      </motion.div>
+                    )}
+                    {Object.keys(peers).map((peerId) => (
+                      <motion.div
+                        key={peerId}
+                        initial={{ scale: 0.8, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        className="w-40 h-28 bg-black rounded-lg overflow-hidden relative"
+                      >
+                        <video
+                          ref={(el) => {
+                            if (el && peers[peerId]) el.srcObject = peers[peerId];
+                          }}
+                          autoPlay
+                          className="w-full h-full object-cover"
+                        />
+                        <span className="absolute bottom-1 left-1 text-xs text-white bg-black/50 px-2 py-1 rounded">
+                          {participants.find((p) => p.id === peerId)?.username || `User ${peerId.slice(0, 4)}`}
+                        </span>
+                      </motion.div>
+                    ))}
+                  </ScrollArea>
+                  <ScrollArea className="flex-1 p-4 bg-white/5 rounded-lg mb-4">
+                    {chatMessages.length === 0 && (
+                      <p className="text-white/60 text-center py-4">No messages yet. Start chatting!</p>
+                    )}
+                    {chatMessages.map((msg, index) => (
+                      <motion.div
+                        key={index}
+                        variants={chatMessageVariants}
+                        initial="hidden"
+                        animate="visible"
+                        className={cn(
+                          'mb-3 p-3 rounded-lg',
+                          msg.type === 'system'
+                            ? 'text-white/60 bg-white/5'
+                            : msg.userId === tempUserId
+                            ? 'bg-blue-600/20 text-white ml-auto max-w-[80%]'
+                            : 'bg-white/10 text-white max-w-[80%]'
+                        )}
+                      >
+                        <div className="flex justify-between items-baseline">
+                          <span className="font-medium text-sm">
+                            {msg.type === 'system' ? 'System' : msg.username}
+                          </span>
+                          <span className="text-xs text-white/50">
+                            {new Date(msg.timestamp).toLocaleTimeString()}
+                          </span>
+                        </div>
+                        <span>{msg.message}</span>
+                      </motion.div>
+                    ))}
+                    <div ref={chatContainerRef} />
+                  </ScrollArea>
+                  <div className="flex items-center">
+                    <Textarea
+                      placeholder="Type a message..."
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      className="flex-1 bg-white/5 border-white/10 text-white resize-none h-12"
+                      disabled={!roomId}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          console.log('Chat send button clicked via Enter (Netlify deploy)');
+                          sendChatMessage();
+                        }
+                      }}
+                    />
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            className="ml-2 bg-blue-600 hover:bg-blue-700"
+                            onClick={() => {
+                              console.log('Chat send button clicked (Netlify deploy)');
+                              sendChatMessage();
+                            }}
+                            disabled={!roomId || !chatInput.trim()}
+                          >
+                            <MessageSquare className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Send message</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
                 </div>
               </div>
             </motion.div>
