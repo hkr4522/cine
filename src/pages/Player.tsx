@@ -1,4 +1,4 @@
-import { useParams, Navigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import {
   ExternalLink,
   Users,
@@ -11,6 +11,8 @@ import {
   Copy,
   AlertCircle,
   Loader2,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -27,13 +29,14 @@ import MediaActions from '@/components/player/MediaActions';
 import { useMediaPlayer } from '@/hooks/use-media-player';
 import { useAuth } from '@/hooks';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import io from 'socket.io-client';
+import io, { Socket } from 'socket.io-client';
 import Peer from 'simple-peer';
 import { videoSources } from '@/utils/video-sources';
 import { cn } from '@/lib/utils';
+import { v4 as uuidv4 } from 'uuid';
 
-// Initialize Socket.IO client with reconnection settings for robust connectivity
-const socket = io('http://your-backend-server:3000', {
+// Initialize Socket.IO client with reconnection settings
+const socket: Socket = io('http://your-backend-server:3000', {
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
@@ -136,6 +139,8 @@ const Player = () => {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [isLoadingRoom, setIsLoadingRoom] = useState(false);
   const [isServiceWorkerError, setIsServiceWorkerError] = useState(false);
+  const [tempUserId] = useState(user?.id || uuidv4()); // Generate temp ID for unauthenticated users
+  const [tempUsername] = useState(user?.username || `Guest_${tempUserId.slice(0, 4)}`);
 
   // References for DOM elements and WebRTC streams
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -148,16 +153,10 @@ const Player = () => {
   useEffect(() => {
     if (!navigator.serviceWorker) {
       setIsServiceWorkerError(true);
-      setError('Service worker not supported. Some features may be unavailable.');
-      toast.error('Service worker not supported');
+      setError('Service worker not supported. Some features may be limited.');
+      toast.warning('Service worker not supported');
     }
   }, []);
-
-  // Redirect to login if user is not authenticated
-  if (!isAuthLoading && !user) {
-    toast.error('Please log in to access Party Watch');
-    return <Navigate to="/login" replace />;
-  }
 
   // Generate random room ID
   const generateRoomId = useCallback(() => {
@@ -166,11 +165,6 @@ const Player = () => {
 
   // Create a new room
   const createRoom = useCallback(() => {
-    if (!user) {
-      setError('Authentication required to create a room');
-      toast.error('Please log in to create a room');
-      return;
-    }
     if (!roomPassword.trim()) {
       setError('Please enter a password to create a room');
       toast.error('Password is required');
@@ -183,18 +177,14 @@ const Player = () => {
     socket.emit('create-room', {
       roomId: newRoomId,
       password: roomPassword,
-      userId: user.id,
-      username: user.username || 'Anonymous',
+      userId: tempUserId,
+      username: tempUsername,
     });
-  }, [roomPassword, user]);
+    console.log('Creating room:', { roomId: newRoomId, userId: tempUserId });
+  }, [roomPassword, tempUserId, tempUsername]);
 
   // Join an existing room
   const joinRoom = useCallback(() => {
-    if (!user) {
-      setError('Authentication required to join a room');
-      toast.error('Please log in to join a room');
-      return;
-    }
     if (!joinRoomId.trim() || !joinRoomPassword.trim()) {
       setError('Room ID and password are required');
       toast.error('Room ID and password are required');
@@ -204,18 +194,14 @@ const Player = () => {
     socket.emit('join-room', {
       roomId: joinRoomId,
       password: joinRoomPassword,
-      userId: user.id,
-      username: user.username || 'Anonymous',
+      userId: tempUserId,
+      username: tempUsername,
     });
-  }, [joinRoomId, joinRoomPassword, user]);
+    console.log('Joining room:', { roomId: joinRoomId, userId: tempUserId });
+  }, [joinRoomId, joinRoomPassword, tempUserId, tempUsername]);
 
   // Initialize WebRTC for voice/video communication
   const initWebRTC = useCallback(async () => {
-    if (!user) {
-      setError('Authentication required for voice/video chat');
-      toast.error('Please log in to use voice/video chat');
-      return;
-    }
     try {
       const constraints = {
         video: isVideoChatActive,
@@ -225,21 +211,18 @@ const Player = () => {
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = localStreamRef.current;
       }
-      socket.emit('webrtc-offer', { roomId, userId: user.id });
+      socket.emit('webrtc-offer', { roomId, userId: tempUserId });
+      console.log('WebRTC initialized for user:', tempUserId);
       toast.success('WebRTC initialized successfully');
     } catch (err) {
       setError(`Failed to initialize WebRTC: ${err.message}`);
       toast.error(`WebRTC error: ${err.message}`);
+      console.error('WebRTC initialization error:', err);
     }
-  }, [isVideoChatActive, isVoiceChatActive, roomId, user]);
+  }, [isVideoChatActive, isVoiceChatActive, roomId, tempUserId]);
 
   // Start screen sharing
   const startScreenSharing = useCallback(async () => {
-    if (!user) {
-      setError('Authentication required for screen sharing');
-      toast.error('Please log in to share your screen');
-      return;
-    }
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: { cursor: 'always' },
@@ -265,12 +248,14 @@ const Player = () => {
       screenStream.getVideoTracks()[0].onended = () => {
         stopScreenSharing();
       };
+      console.log('Screen sharing started for user:', tempUserId);
       toast.success('Screen sharing started');
     } catch (err) {
       setError(`Failed to start screen sharing: ${err.message}`);
       toast.error(`Screen sharing error: ${err.message}`);
+      console.error('Screen sharing error:', err);
     }
-  }, [user]);
+  }, []);
 
   // Stop screen sharing
   const stopScreenSharing = useCallback(async () => {
@@ -293,12 +278,15 @@ const Player = () => {
           if (localVideoRef.current) {
             localVideoRef.current.srcObject = localStreamRef.current;
           }
+          console.log('Screen sharing stopped, video restored');
           toast.success('Screen sharing stopped, video restored');
         } catch (err) {
           setError(`Failed to restore video stream: ${err.message}`);
           toast.error(`Video restore error: ${err.message}`);
+          console.error('Video restore error:', err);
         }
       } else {
+        console.log('Screen sharing stopped');
         toast.success('Screen sharing stopped');
       }
     }
@@ -306,11 +294,6 @@ const Player = () => {
 
   // Toggle voice chat
   const toggleVoiceChat = useCallback(async () => {
-    if (!user) {
-      setError('Authentication required for voice chat');
-      toast.error('Please log in to use voice chat');
-      return;
-    }
     if (!isVoiceChatActive) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -328,25 +311,23 @@ const Player = () => {
           }
         });
         setIsVoiceChatActive(true);
+        console.log('Voice chat enabled for user:', tempUserId);
         toast.success('Voice chat enabled');
       } catch (err) {
         setError(`Failed to start voice chat: ${err.message}`);
         toast.error(`Voice chat error: ${err.message}`);
+        console.error('Voice chat error:', err);
       }
     } else {
       localStreamRef.current?.getAudioTracks().forEach((track) => track.stop());
       setIsVoiceChatActive(false);
+      console.log('Voice chat disabled');
       toast.info('Voice chat disabled');
     }
-  }, [isVoiceChatActive, user]);
+  }, [isVoiceChatActive]);
 
   // Toggle video chat
   const toggleVideoChat = useCallback(async () => {
-    if (!user) {
-      setError('Authentication required for video chat');
-      toast.error('Please log in to use video chat');
-      return;
-    }
     if (!isVideoChatActive) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -367,10 +348,12 @@ const Player = () => {
           }
         });
         setIsVideoChatActive(true);
+        console.log('Video chat enabled for user:', tempUserId);
         toast.success('Video chat enabled');
       } catch (err) {
         setError(`Failed to start video chat: ${err.message}`);
         toast.error(`Video chat error: ${err.message}`);
+        console.error('Video chat error:', err);
       }
     } else {
       localStreamRef.current?.getVideoTracks().forEach((track) => track.stop());
@@ -378,29 +361,26 @@ const Player = () => {
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = localStreamRef.current;
       }
+      console.log('Video chat disabled');
       toast.info('Video chat disabled');
     }
-  }, [isVideoChatActive, user]);
+  }, [isVideoChatActive]);
 
   // Send chat message
   const sendChatMessage = useCallback(() => {
-    if (!user) {
-      setError('Authentication required to send messages');
-      toast.error('Please log in to send messages');
-      return;
-    }
     if (chatInput.trim()) {
       const message: ChatMessage = {
         roomId,
-        userId: user.id,
-        username: user.username || 'Anonymous',
+        userId: tempUserId,
+        username: tempUsername,
         message: chatInput,
         timestamp: Date.now(),
       };
       socket.emit('chat-message', message);
       setChatInput('');
+      console.log('Chat message sent:', message);
     }
-  }, [chatInput, roomId, user]);
+  }, [chatInput, roomId, tempUserId, tempUsername]);
 
   // Copy room ID to clipboard
   const copyRoomId = useCallback(() => {
@@ -415,7 +395,12 @@ const Player = () => {
           timestamp: Date.now(),
         },
       ]);
+      console.log('Room ID copied:', roomId);
       toast.success('Room ID copied');
+    }).catch((err) => {
+      setError('Failed to copy room ID');
+      toast.error('Failed to copy room ID');
+      console.error('Copy room ID error:', err);
     });
   }, [roomId]);
 
@@ -424,12 +409,15 @@ const Player = () => {
     // Socket connection status
     socket.on('connect', () => {
       setIsSocketConnected(true);
+      setError('');
+      console.log('Socket connected');
       toast.info('Connected to server');
     });
 
     socket.on('disconnect', () => {
       setIsSocketConnected(false);
       setError('Disconnected from server. Attempting to reconnect...');
+      console.warn('Socket disconnected');
       toast.error('Disconnected from server');
     });
 
@@ -451,6 +439,7 @@ const Player = () => {
           timestamp: Date.now(),
         },
       ]);
+      console.log('Room joined:', { roomId, users });
       toast.success(`Joined room ${roomId}`);
     });
 
@@ -459,12 +448,14 @@ const Player = () => {
       setError(message);
       setIsRoomCreated(false);
       setIsLoadingRoom(false);
+      console.error('Room error:', message);
       toast.error(message);
     });
 
     // Receive chat message
     socket.on('chat-message', ({ userId, username, message, timestamp }) => {
       setChatMessages((prev) => [...prev, { userId, username, message, timestamp }]);
+      console.log('Received chat message:', { userId, username, message });
     });
 
     // User joined room
@@ -480,6 +471,7 @@ const Player = () => {
         },
       ]);
       setParticipants((prev) => [...prev, { id: userId, username }]);
+      console.log('User joined:', { userId, username });
       toast.info(`${username} joined the room`);
     });
 
@@ -506,12 +498,12 @@ const Player = () => {
           return newPeers;
         });
       }
+      console.log('User left:', { userId, username });
       toast.info(`${username} left the room`);
     });
 
     // WebRTC offer
     socket.on('webrtc-offer', ({ from, offer }) => {
-      if (!user) return;
       const peer = new Peer({
         initiator: false,
         trickle: false,
@@ -537,11 +529,13 @@ const Player = () => {
 
       peer.on('error', (err) => {
         setError(`WebRTC peer error: ${err.message}`);
+        console.error('WebRTC peer error:', err);
         toast.error(`WebRTC peer error: ${err.message}`);
       });
 
       peer.signal(offer);
       peersRef.current.push({ userId: from, peer });
+      console.log('WebRTC offer received from:', from);
     });
 
     // WebRTC answer
@@ -549,6 +543,7 @@ const Player = () => {
       const peer = peersRef.current.find((p) => p.userId === from);
       if (peer) {
         peer.peer.signal(answer);
+        console.log('WebRTC answer received from:', from);
       }
     });
 
@@ -564,7 +559,7 @@ const Player = () => {
       socket.off('webrtc-offer');
       socket.off('webrtc-answer');
     };
-  }, [roomId, initWebRTC, user]);
+  }, [roomId, initWebRTC]);
 
   // Auto-scroll chat container
   useEffect(() => {
@@ -580,12 +575,13 @@ const Player = () => {
         localStreamRef.current.getTracks().forEach((track) => track.stop());
       }
       peersRef.current.forEach(({ peer }) => peer.destroy());
-      if (roomId && user) {
-        socket.emit('leave-room', { roomId, userId: user.id });
+      if (roomId) {
+        socket.emit('leave-room', { roomId, userId: tempUserId });
       }
       socket.disconnect();
+      console.log('Component unmounted, cleaned up resources');
     };
-  }, [roomId, user]);
+  }, [roomId, tempUserId]);
 
   // Render participant list
   const renderParticipantList = () => (
@@ -608,6 +604,31 @@ const Player = () => {
           </ul>
         )}
       </ScrollArea>
+    </div>
+  );
+
+  // Render connection status
+  const renderConnectionStatus = () => (
+    <div className="flex items-center space-x-2 text-sm text-white/60 mb-4">
+      {isSocketConnected ? (
+        <>
+          <Wifi className="h-4 w-4 text-green-500" />
+          <span>Connected to server</span>
+        </>
+      ) : (
+        <>
+          <WifiOff className="h-4 w-4 text-red-500" />
+          <span>Disconnected. Reconnecting...</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-2 border-white/10 bg-white/5 hover:bg-white/10"
+            onClick={() => socket.connect()}
+          >
+            Retry
+          </Button>
+        </>
+      )}
     </div>
   );
 
@@ -704,21 +725,17 @@ const Player = () => {
                     size="sm"
                     className={cn(
                       'border-white/10 bg-white/5 backdrop-blur-sm hover:bg-white/10 transition-all duration-300',
-                      (!isSocketConnected || isServiceWorkerError || !user) && 'opacity-50 cursor-not-allowed'
+                      (!isSocketConnected || isServiceWorkerError) && 'opacity-50 cursor-not-allowed'
                     )}
-                    onClick={() => user && setIsPartyWatchOpen(true)}
-                    disabled={!isSocketConnected || isServiceWorkerError || !user}
+                    onClick={() => setIsPartyWatchOpen(true)}
+                    disabled={!isSocketConnected || isServiceWorkerError}
                   >
                     <Users className="h-4 w-4 mr-2" />
                     Party Watch
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>
-                    {user
-                      ? 'Start or join a watch party'
-                      : 'Please log in to use Party Watch'}
-                  </p>
+                  <p>Start or join a watch party</p>
                 </TooltipContent>
               </Tooltip>
               <Tooltip>
@@ -728,23 +745,17 @@ const Player = () => {
                     size="sm"
                     className={cn(
                       'border-white/10 bg-white/5 backdrop-blur-sm hover:bg-white/10 transition-all duration-300',
-                      (isScreenSharing || !roomId || isServiceWorkerError || !user) && 'opacity-50 cursor-not-allowed'
+                      (isScreenSharing || !roomId || isServiceWorkerError) && 'opacity-50 cursor-not-allowed'
                     )}
                     onClick={startScreenSharing}
-                    disabled={isScreenSharing || !roomId || isServiceWorkerError || !user}
+                    disabled={isScreenSharing || !roomId || isServiceWorkerError}
                   >
                     <Share2 className="h-4 w-4 mr-2" />
                     {isScreenSharing ? 'Sharing Screen' : 'Share Screen'}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>
-                    {user
-                      ? isScreenSharing
-                        ? 'Screen is being shared'
-                        : 'Share your screen with the room'
-                      : 'Please log in to share your screen'}
-                  </p>
+                  <p>{isScreenSharing ? 'Screen is being shared' : 'Share your screen with the room'}</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -788,7 +799,7 @@ const Player = () => {
 
       {/* Party Watch Overlay */}
       <AnimatePresence>
-        {isPartyWatchOpen && user && (
+        {isPartyWatchOpen && (
           <motion.div
             variants={overlayVariants}
             initial="hidden"
@@ -811,8 +822,8 @@ const Player = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            if (roomId && user) {
-                              socket.emit('leave-room', { roomId, userId: user.id });
+                            if (roomId) {
+                              socket.emit('leave-room', { roomId, userId: tempUserId });
                               setRoomId('');
                               setChatMessages([]);
                               setIsVoiceChatActive(false);
@@ -826,6 +837,7 @@ const Player = () => {
                             setJoinRoomId('');
                             setJoinRoomPassword('');
                             setError('');
+                            console.log('Party Watch closed');
                           }}
                         >
                           <X className="h-5 w-5 text-white" />
@@ -837,6 +849,7 @@ const Player = () => {
                     </Tooltip>
                   </TooltipProvider>
                 </div>
+                {renderConnectionStatus()}
                 {error && (
                   <motion.div
                     initial={{ opacity: 0 }}
@@ -911,6 +924,15 @@ const Player = () => {
                         Join Room
                       </Button>
                     </div>
+                    {!user && (
+                      <p className="text-sm text-white/60">
+                        You're joining as a guest ({tempUsername}).{' '}
+                        <a href="/login" className="text-blue-500 hover:underline">
+                          Log in
+                        </a>{' '}
+                        for a personalized experience.
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -945,18 +967,17 @@ const Player = () => {
                       variant="destructive"
                       className="w-full"
                       onClick={() => {
-                        if (user) {
-                          socket.emit('leave-room', { roomId, userId: user.id });
-                          setRoomId('');
-                          setChatMessages([]);
-                          setIsVoiceChatActive(false);
-                          setIsVideoChatActive(false);
-                          stopScreenSharing();
-                          setIsRoomCreated(false);
-                          setRoomPassword('');
-                          setParticipants([]);
-                          toast.info('Left the room');
-                        }
+                        socket.emit('leave-room', { roomId, userId: tempUserId });
+                        setRoomId('');
+                        setChatMessages([]);
+                        setIsVoiceChatActive(false);
+                        setIsVideoChatActive(false);
+                        stopScreenSharing();
+                        setIsRoomCreated(false);
+                        setRoomPassword('');
+                        setParticipants([]);
+                        console.log('Left room:', roomId);
+                        toast.info('Left the room');
                       }}
                     >
                       Leave Room
@@ -978,14 +999,14 @@ const Player = () => {
                             size="sm"
                             className="border-white/10 bg-white/5 hover:bg-white/10"
                             onClick={toggleVoiceChat}
-                            disabled={!roomId || isServiceWorkerError || !user}
+                            disabled={!roomId || isServiceWorkerError}
                           >
                             <Mic className="h-4 w-4 mr-2" />
                             {isVoiceChatActive ? 'Stop Voice' : 'Start Voice'}
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent>
-                          <p>{user ? (isVoiceChatActive ? 'Disable voice chat' : 'Enable voice chat') : 'Please log in'}</p>
+                          <p>{isVoiceChatActive ? 'Disable voice chat' : 'Enable voice chat'}</p>
                         </TooltipContent>
                       </Tooltip>
                       <Tooltip>
@@ -995,14 +1016,14 @@ const Player = () => {
                             size="sm"
                             className="border-white/10 bg-white/5 hover:bg-white/10"
                             onClick={toggleVideoChat}
-                            disabled={!roomId || isServiceWorkerError || !user}
+                            disabled={!roomId || isServiceWorkerError}
                           >
                             <Video className="h-4 w-4 mr-2" />
                             {isVideoChatActive ? 'Stop Video' : 'Start Video'}
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent>
-                          <p>{user ? (isVideoChatActive ? 'Disable video chat' : 'Enable video chat') : 'Please log in'}</p>
+                          <p>{isVideoChatActive ? 'Disable video chat' : 'Enable video chat'}</p>
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
@@ -1024,7 +1045,7 @@ const Player = () => {
                         className="w-full h-full object-cover"
                       />
                       <span className="absolute bottom-1 left-1 text-xs text-white bg-black/50 px-2 py-1 rounded">
-                        You
+                        {tempUsername}
                       </span>
                     </motion.div>
                   )}
@@ -1064,7 +1085,7 @@ const Player = () => {
                         'mb-3 p-3 rounded-lg',
                         msg.type === 'system'
                           ? 'text-white/60 bg-white/5'
-                          : msg.userId === user?.id
+                          : msg.userId === tempUserId
                           ? 'bg-blue-600/20 text-white ml-auto max-w-[80%]'
                           : 'bg-white/10 text-white max-w-[80%]'
                       )}
@@ -1090,7 +1111,7 @@ const Player = () => {
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     className="flex-1 bg-white/5 border-white/10 text-white resize-none h-12"
-                    disabled={!roomId || isServiceWorkerError || !user}
+                    disabled={!roomId || isServiceWorkerError}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
@@ -1104,13 +1125,13 @@ const Player = () => {
                         <Button
                           className="ml-2 bg-blue-600 hover:bg-blue-700"
                           onClick={sendChatMessage}
-                          disabled={!roomId || !chatInput.trim() || isServiceWorkerError || !user}
+                          disabled={!roomId || !chatInput.trim() || isServiceWorkerError}
                         >
                           <MessageSquare className="h-4 w-4" />
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>
-                        <p>{user ? 'Send message' : 'Please log in to send messages'}</p>
+                        <p>Send message</p>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
